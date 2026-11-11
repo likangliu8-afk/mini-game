@@ -1,16 +1,18 @@
-"""[Phase 2] Expectiminimax、Minimax 与 Greedy 算法及启发式评估函数。
-
-Responsibilities:
-- 启发式评估函数 evaluate(state)
-- Expectiminimax（对骰子随机层取期望）
-- Minimax（确定性局面剪枝搜索，alpha-beta）
-- Greedy（单步评估选择）
-- 统一接口: choose_move(state, algorithm) -> move
-"""
+# Name: LAW LI KANG RAIN
+# Student ID: 1904VECI
+#
+# Phase 2: Expectiminimax, Minimax and Greedy algorithms with heuristic evaluation.
+#
+# Responsibilities:
+# - heuristic evaluation function evaluate(state)
+# - Expectiminimax (expectation over the chance/dice layer)
+# - Minimax (deterministic look-ahead with alpha-beta pruning)
+# - Greedy (single-step evaluation)
+# - unified entry point: choose_move(state, algorithm)
 
 # TODO(Phase 2):
-# - 实现 evaluate(state) 启发式评估
-# - 实现 expectiminimax(state, depth)
-# - 实现 minimax(state, depth, alpha, beta)
-# - 实现 greedy(state)
-# - 提供 choose_move(state, algorithm, depth=3) 统一入口
+# - implement evaluate(state) heuristic
+# - implement expectiminimax(state, depth)
+# - implement minimax(state, depth, alpha, beta)
+# - implement greedy(state)
+# - provide choose_move(state, algorithm, depth=3) as the unified API

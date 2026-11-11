@@ -1,12 +1,14 @@
-"""[Phase 3] 读取 pixelfx 序列帧 + 纯 Python 像素粒子回退渲染器。
-
-Responsibilities:
-- 解析 assets/vfx/*.json 时序文件并切分 PNG sprite sheet
-- 按帧驱动播放序列动画（dice_roll / hit_explosion / rune_glow）
-- 文件缺失时的纯 Python 像素粒子回退渲染器
-"""
+# Name: LAW LI KANG RAIN
+# Student ID: 1904VECI
+#
+# Phase 3: pixelfx sprite-sheet loader + pure-Python pixel particle fallback renderer.
+#
+# Responsibilities:
+# - parse assets/vfx/*.json timelines and slice the PNG sprite sheets
+# - drive sprite-frame playback (dice_roll / hit_explosion / rune_glow)
+# - pure-Python pixel particle fallback renderer when assets are missing
 
 # TODO(Phase 3):
-# - 实现 SpriteSheetLoader(path_png, path_json)
-# - 实现 EffectPlayer: update(dt) / draw(surface, x, y)
-# - 实现 PixelParticleFallback（无素材时的回退粒子效果）
+# - implement SpriteSheetLoader(path_png, path_json)
+# - implement EffectPlayer: update(dt) / draw(surface, x, y)
+# - implement PixelParticleFallback (fallback particles when assets are absent)

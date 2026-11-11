@@ -1,11 +1,14 @@
-"""[Phase 4] Pygame 主循环、网格棋盘 UI、学号姓名顶栏、AI 思考分值面板。
-
-Usage:
-    python pixel_dice_ur/main.py
-"""
+# Name: LAW LI KANG RAIN
+# Student ID: 1904VECI
+#
+# Phase 4: Pygame main loop, grid board UI, student-id/name top bar and
+# AI thinking score panel.
+#
+# Usage:
+#     python pixel_dice_ur/main.py
 
 # TODO(Phase 4):
-# - Pygame 主循环（事件 / 更新 / 绘制）
-# - 网格棋盘 UI 渲染
-# - 顶栏：学号 + 姓名
-# - AI 思考分值面板（评估分 / 搜索深度 / 耗时显示）
+# - Pygame main loop (events / update / draw)
+# - grid board UI rendering
+# - top bar: student ID + name
+# - AI thinking score panel (evaluation score / search depth / decision time display)
