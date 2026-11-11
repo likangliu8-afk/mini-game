@@ -15,7 +15,7 @@
 | GitHub | https://github.com/likangliu8-afk/mini-game |
 | Phase 3 commit | `cc4d987`（feat(phase3)：4 组 pixelfx 资产 + VFXManager） |
 | Phase 4 commit | `67acf00`（feat(phase4)：`main.py` + `gameplay_preview.png` + 本 `Agents.md`） |
-| Phase 4.5 commit | 本次提交（fix + feat：4 个实机 bug 修复 + `pixel_art.py` 像素美术重制 + 新 `gameplay_preview.png`） |
+| Phase 4.5 commit | `8025ebe`（fix + feat：4 个实机 bug 修复 + `pixel_art.py` 像素美术重制 + 新 `gameplay_preview.png`） |
 
 **阶段进度：**
 
