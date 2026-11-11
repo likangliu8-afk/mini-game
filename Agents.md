@@ -15,6 +15,7 @@
 | GitHub | https://github.com/likangliu8-afk/mini-game |
 | Phase 3 commit | `cc4d987`（feat(phase3)：4 组 pixelfx 资产 + VFXManager） |
 | Phase 4 commit | `67acf00`（feat(phase4)：`main.py` + `gameplay_preview.png` + 本 `Agents.md`） |
+| Phase 4.5 commit | 本次提交（fix + feat：4 个实机 bug 修复 + `pixel_art.py` 像素美术重制 + 新 `gameplay_preview.png`） |
 
 **阶段进度：**
 
@@ -22,6 +23,7 @@
 - Phase 2 `ai_engine.py` + `evaluate_ai.py` ✅ 完成
 - Phase 3 `vfx_manager.py` + 4 组 pixelfx 资产 ✅ 完成
 - Phase 4 `main.py`（Pygame 主循环 + 棋盘 UI + 学号姓名顶栏 + AI 决策透视面板 + 特效绑定 + `--self-test`）✅ 完成
+- Phase 4.5 交互 bug 修复 + 独立游戏级像素美术重制（`pixel_art.py` + `main.py` 升级）✅ 完成
 
 ---
 
@@ -170,6 +172,33 @@
 
 **`--self-test` 无头自检**：`SDL_VIDEODRIVER=dummy` 快进 30 步 AI vs AI，全 UI 渲染 + 4 种特效强制出现，保存 `pixel_dice_ur/gameplay_preview.png` 供规划者目检排版；正常无参运行则开真实窗口供人类游玩。
 
+### Phase 4.5 — 交互 Bug 修复 + 独立游戏级像素美术重制（`pixel_art.py` + `main.py` 升级）
+
+**实机试玩反馈的 4 个 bug，全部修复并纳入 `--self-test` 强制实测：**
+
+| # | Bug | 修复 |
+|---|---|---|
+| 1 | `NameError: WAR_END`（悬停合法棋子即闪退；`draw_target_preview` 用到但顶部漏导入） | `from game_state import ... WAR_START, WAR_END ...`；self-test 现显式模拟 `on_hover` / `draw_target_preview` / `on_click`（Hint 按钮、AI 按钮、棋子点击、目标格点击），所有人类交互分支 100% 经过断言 |
+| 2 | 落点预览画在 `pygame.display.flip()` 之后，屏幕上看不到；且只能点棋子不能点预览格 | `draw_target_preview` 移入 `render()` 内部、`flip()` 之前绘制；`on_click` 新增：点击高亮预览的目标格也直接走子 |
+| 3 | 起点 3 枚棋子重叠遮挡（`[0,0,0]` 三子同心） | 0 号待命区改为上下独立的 **3 槽位备战托盘 P1/P2 RESERVE**（每枚棋子独立凹槽，烘焙贴图 + 独立坐标）；10 号得分终点改为 3 槽位 **P1/P2 SCORED** 展示托盘；同时去掉 3×6 网格里 `(0,2)(0,3)(2,2)(2,3)` 的 4 个无意义格子（侧行只保留 `2,1` 与 `8*,9`，符合乌尔城工字形拓扑） |
+| 4 | `Hint: ON` 假开关（开了不渲染、掷骰后不刷新） | `hint_on=True` 且 P1 选择回合时，Inspector 面板顶部以青色显示 `[HUMAN HINT - Expectiminimax d=4]` + 每步候选分 + `[RECOMMENDED]`；每次掷骰落地后自动重算（`commit_roll` 内刷新），走子后清空 |
+
+**新增 `pixel_art.py`（纯 Python 预烘焙像素美术库，零外部素材，100% 原创）：**
+
+- **地砖贴图**：28×28 像素级绘制 → 3× 最近邻放大至 84×84，启动时一次烘焙缓存。5 种：
+  - P1/P2 专属通道砖（青金石蓝 / 皇家深紫红石板 + 菱形暗纹 + bevel 高光/暗边 + 四角金属装饰点）
+  - 交战区砖（黑曜石暗红 + 像素交叉双剑 / 战损裂纹暗纹）
+  - 符文护盾格（古巴比伦八角星花窗 Rosette 金青镶嵌 + 3 档呼吸光晕）
+  - 终点圣坛（黄金阶梯神庙纹章 + 绿宝石）
+- **路线导引层**：烘焙在棋盘底层的虚线轨迹 + 像素小箭头（备战槽 → 1 → 2 → 中路 3..7 → 8 → 9 → 终点 10），新手/老师一眼看懂走法
+- **立体像素棋子**：40×40 预渲染精灵（半透明椭圆投影 + 3px 立体底座 + 金属包边 + 左上像素高光 + 居中数字 1/2/3）
+- **3D 像素骰子**：72×72 等距立体（白色正面 + 浅灰顶面 + 暗侧边 + 1/2/3 点 + "?" 面）；ROLL 时播放 260ms 骰面随机跳动 + 弹跳动画，定格瞬间爆开 `dice_roll` pixelfx
+- **氛围背景**：30 颗缓慢上浮闪烁的金/青/白像素星尘
+- **浮雕 UI 面板**：双层暗金镶边 + 四角铆钉 + 渐变标题底条；按钮 Hover 高亮 / 禁用态区分；醒目回合状态横幅（`YOUR TURN - ROLL DICE` / `YOUR TURN - SELECT A PIECE` / `AI THINKING...` / `ROLLING...`）
+
+**其他**：所有 `def` 上方 `#` 注释合规（做什么 + 参数/变量用途），全英文零中文。
+
+
 ---
 
 ## 4. 验证证据
@@ -198,6 +227,18 @@
 
 - 30 步 AI vs AI 快进，全 UI 渲染 + 4 种特效强制出现，零报错；`gameplay_preview.png` 已目检：顶栏署名、Inspector（含候选分+ [BEST]）、双栏骰子/日志、4 组特效均无重叠/越界/遮挡
 
+**Phase 4.5 无头自检（`python pixel_dice_ur/main.py --self-test`，SDL dummy driver）实际输出：**
+
+```
+[self-test] interaction QA passed (Hint: ON, hover preview, target-cell click, AI button, piece click)
+[self-test] rendered 16 fast steps; preview saved to ...\pixel_dice_ur\gameplay_preview.png
+[self-test] game over=False, winner=0, turns=22
+[self-test] all main.py UI checks passed
+```
+
+- 交互 QA 断言全部通过：Hint 开关立即计算青色 `[HUMAN HINT]` 候选分、悬停命中合法棋子、**直接点击预览目标格**成功走子、AI 按钮循环切换、点击棋子中心成功走子
+- 新 `gameplay_preview.png`（16 步中期对局，避免终局遮罩）已目检：像素地砖纹理、备战/得分槽位、3D 骰子、路线虚线导引、铆钉镶边面板、星尘背景、Inspector 候选分 + [BEST]、4 组特效——**无重叠 / 越界 / 遮挡**
+
 ---
 
 ## 5. 本机运行环境（供复现）
@@ -219,6 +260,12 @@
 - 特效触发映射与 scale 参数是否合适？
 - `--self-test` 生成的 `gameplay_preview.png` 排版是否无重叠/越界/遮挡？
 - 是否还有其他 UI 细节需要调整？
+
+**Phase 4.5 已完成（规划者提出的 4 个实机 bug 全部修复 + 像素美术重制），请规划者核对：**
+- 4 个 bug 的修复方式是否符合要求（特别是 `WAR_END` 导入 + self-test 全交互分支实测、预览渲染顺序 + 可点目标格、3 槽位备战/得分托盘 + 工字形棋盘、Hint 真开关青色 `[HUMAN HINT]` 面板）？
+- 新 `pixel_art.py` 的像素美术质感（地砖/棋子/3D 骰子/路线导引/星尘/铆钉面板/状态横幅）是否达到"独立游戏级"？
+- 260ms 骰子翻滚动画与 4 组 pixelfx 的衔接是否自然？
+- 新 `gameplay_preview.png` 的排版与美感是否通过验收？
 
 ---
 
