@@ -14,7 +14,7 @@
 | 语言 | 纯 Python（Phase 4 引入 pygame） |
 | GitHub | https://github.com/likangliu8-afk/mini-game |
 | Phase 3 commit | `cc4d987`（feat(phase3)：4 组 pixelfx 资产 + VFXManager） |
-| Phase 4 commit | 本次提交（`main.py` + `gameplay_preview.png` + 本 `Agents.md` 更新） |
+| Phase 4 commit | `67acf00`（feat(phase4)：`main.py` + `gameplay_preview.png` + 本 `Agents.md`） |
 
 **阶段进度：**
 
