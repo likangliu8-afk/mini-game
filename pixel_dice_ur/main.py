@@ -1,27 +1,17 @@
 # Name: LAW LI KANG RAIN
 # Student ID: 1904VECI
 #
-# Phase 4.6: pygame main loop with an indie-grade retro pixel look (pixel_art bank),
-# the AI Decision Inspector panel, dice console + battle log, the four pixelfx
-# effects bound to game events, dice tumble animation and a --self-test that also
-# exercises every human interaction branch (hover preview, button/piece/target
-# clicks, Hint: ON) plus a real-pacing (fast=False) state-machine regression
-# before saving gameplay_preview.png.
-#
-# Phase 4.6 fixes: rune-glow tier float indexing (int cast), the fast=False AI
-# turn deadlock (unified _enter_phase + do_ai_move phase hand-back), and the
-# left-panel dock/tray/banner overlap re-layout.
-#
-# Usage:
-#     python pixel_dice_ur/main.py               # real window for a human player
-#     python pixel_dice_ur/main.py --self-test   # headless render + interaction QA + preview png
+# Phase 4.6: Pygame main loop with Babylonian pixel-art visuals (pixel_art bank),
+# top authorship banner, non-overlapping 3-slot reserve docks and scored trays,
+# clear S-curve directional track bridges (Reserve -> 1 -> 2 -> 3..7 -> 8* -> 9 -> 10),
+# AI Decision Inspector panel with live Human Hint mode, 3D tumbling dice console,
+# battle log, pixelfx event bindings, and --self-test QA.
 
 import math
 import os
-import sys
 import random
+import sys
 
-# import the sibling Phase 1/2/3 modules (works both as a script and as a module)
 try:
     from game_state import (BOARD_END, DICE_PROBS, SAFE_TILES, WAR_START,
                             WAR_END, GameState)
@@ -40,43 +30,27 @@ except ImportError:
 
 import pygame
 
-# ---- authorship shown in the window title and the top banner (change once here) ----
+# Update AUTHOR_NAME and STUDENT_ID here once before final submission
 AUTHOR_NAME = "LAW LI KANG RAIN"
 STUDENT_ID = "1904VECI"
-BANNER_TEXT = f"PIXEL DICE UR   |   Name: {AUTHOR_NAME}   |   Student ID: {STUDENT_ID}"
+BANNER_TEXT = f"PIXEL DICE UR  |  Name: {AUTHOR_NAME}  |  Student ID: {STUDENT_ID}"
 
-# ---- window / layout ----
 WIN_W, WIN_H = 1024, 640
 BANNER_H = 48
 FPS = 60
 
-TILE = 84                       # one tile is 84x84 px
-GRID_X, GRID_Y = 73, 228        # top-left of the 3x6 grid (228 keeps 12px+ clear of every dock/tray)
-LEFT_W = 650                    # left board panel width; right panel is WIN_W - LEFT_W
+TILE = 84
+GRID_X, GRID_Y = 73, 188        # 3x6 grid spans x=73..577, y=188..440 (cleanly centered in LEFT_W=650)
+LEFT_W = 650
 
-# reserve dock / scored tray plates (3 slots per side, one dedicated slot per piece).
-# Phase 4.6 re-layout: top row sits 12px above the grid, bottom row 14px below it;
-# dock (200 wide) and tray (164 wide) keep 20px horizontal clearance between them.
-DOCK_W, DOCK_H = 200, 72
-TRAY_W, TRAY_H = 164, 72
-TOP_ROW_Y = GRID_Y - DOCK_H - 12         # 144: P1 reserve/scored row above the grid
-BOT_ROW_Y = GRID_Y + 3 * TILE + 14       # 494: P2 reserve/scored row below the grid (566 < 640)
-P1_DOCK = pygame.Rect(GRID_X + 140, TOP_ROW_Y, DOCK_W, DOCK_H)
-P2_DOCK = pygame.Rect(GRID_X + 140, BOT_ROW_Y, DOCK_W, DOCK_H)
-P1_TRAY = pygame.Rect(GRID_X + 360, TOP_ROW_Y, TRAY_W, TRAY_H)
-P2_TRAY = pygame.Rect(GRID_X + 360, BOT_ROW_Y, TRAY_W, TRAY_H)
+# Non-overlapping symmetrical 3-slot Reserve Docks and Scored Trays (74px tall, 32px horizontal gap)
+DOCK_W, DOCK_H = 236, 74
+P1_DOCK = pygame.Rect(GRID_X, GRID_Y - DOCK_H - 14, DOCK_W, DOCK_H)
+P1_TRAY = pygame.Rect(GRID_X + 6 * TILE - DOCK_W, GRID_Y - DOCK_H - 14, DOCK_W, DOCK_H)
+P2_DOCK = pygame.Rect(GRID_X, GRID_Y + 3 * TILE + 14, DOCK_W, DOCK_H)
+P2_TRAY = pygame.Rect(GRID_X + 6 * TILE - DOCK_W, GRID_Y + 3 * TILE + 14, DOCK_W, DOCK_H)
+LEGEND_RECT = pygame.Rect(GRID_X, P2_DOCK.bottom + 12, 6 * TILE, 68)
 
-# slot geometry shared with pixel_art.slot_centers / _bake_dock - the SAME sizes
-# must stay in sync or pieces drift off the baked slot recesses
-DOCK_SLOT, DOCK_SLOT_GAP = 44, 10
-TRAY_SLOT, TRAY_SLOT_GAP = 44, 8
-
-# turn banner: top of the left panel, clear of every dock/tray rect
-TURN_BANNER_Y = BANNER_H + 14            # 62: 56px above the top dock row
-
-# middle-row tile kinds: cols 0..4 = war tiles 3..7 (col 1 is the rune tile 4),
-# col 5 = finish; top/bottom rows: cols 0,1 = lane tiles 1,2; col 2 = dock;
-# cols 4,5 = lane tiles 8,9 (col 4 is the rune tile 8)
 TILE_KIND = {
     (1, 0): "war", (1, 1): "rune", (1, 2): "war", (1, 3): "war", (1, 4): "war",
     (1, 5): "finish",
@@ -89,209 +63,214 @@ TILE_LABEL = {
     (2, 0): "2", (2, 1): "1", (2, 4): "8*", (2, 5): "9",
 }
 
-# ---- timing (ms) ----
-HUMAN_PAUSE_MS = 700           # "No legal moves - Turn skipped" pause
-AI_ROLL_WAIT_MS = 450          # natural pacing: roll -> show evaluation -> move
+HUMAN_PAUSE_MS = 700
+AI_ROLL_WAIT_MS = 420
 AI_MOVE_WAIT_MS = 450
-SLIDE_MS = 180                 # short pixel slide of the moved piece
-ROLL_ANIM_MS = 260             # dice tumble: face flickers, then the dice_roll VFX pops
+SLIDE_MS = 220
+ROLL_ANIM_MS = 260
 
-# ---- palette (text / accents only; surfaces come from pixel_art) ----
-TEXT = (228, 224, 240)
-TEXT_DIM = (150, 146, 168)
-P1_FILL = (64, 200, 220)
-P2_FILL = (214, 60, 84)
-GOLD = (240, 200, 80)
-GREEN = (90, 210, 120)
-RED = (230, 80, 70)
-HI = (255, 240, 120)
-BTN_BLUE = (52, 60, 90)
-BTN_RED = (60, 44, 60)
+TEXT = (232, 228, 244)
+TEXT_DIM = (156, 150, 176)
+P1_FILL = (64, 208, 228)
+P2_FILL = (224, 64, 90)
+GOLD = (244, 204, 88)
+GREEN = (96, 220, 132)
+RED = (234, 82, 74)
+HI = (255, 242, 126)
+BTN_BLUE = (48, 62, 96)
+BTN_RED = (72, 42, 62)
 
 _font_cache = {}
-# Cache a default bitmap font for a given pixel height (retro look, fast to render).
-# size: font height in pixels.
+
+
+# Return a cached crisp system font for UI text so labels look clean rather than jagged.
+# size: target height in pixels; font_obj: cached pygame.font.Font instance.
 def get_font(size):
     if size not in _font_cache:
-        _font_cache[size] = pygame.font.Font(None, size)
+        font_obj = pygame.font.SysFont("consolas,verdana,arial", max(11, int(size * 0.72)), bold=True)
+        if font_obj is None:
+            font_obj = pygame.font.Font(None, size)
+        _font_cache[size] = font_obj
     return _font_cache[size]
 
 
-# Return the grid cell (row, col) for a lane tile (1, 2, 8, 9) of a player.
-# player: 1 = top lane, 2 = bottom lane; tile: the logical lane tile.
+# Map a player's private lane tile (1, 2, 8, or 9) to its `(row, col)` on the 3x6 grid.
+# player: 1 (human top lane) or 2 (AI bottom lane); tile: integer lane index.
 def lane_cell(player, tile):
     row = 0 if player == 1 else 2
     return {1: (row, 1), 2: (row, 0), 8: (row, 4), 9: (row, 5)}[tile]
 
 
-# Return the grid cell (row, col) for a logical tile shared by both players.
-# tile: 3..7 (middle row) or 10 (finish, middle row, right end).
+# Map a shared war-zone or finish tile (3..7 or 10) to its `(row, col)` on the middle row.
+# tile: integer shared tile index (safely returns None if out of range).
 def shared_cell(tile):
-    return {3: (1, 0), 4: (1, 1), 5: (1, 2), 6: (1, 3), 7: (1, 4), 10: (1, 5)}[tile]
+    return {3: (1, 0), 4: (1, 1), 5: (1, 2), 6: (1, 3), 7: (1, 4), 10: (1, 5)}.get(tile)
 
 
-# Return the pixel centre of a grid cell.
-# row, col: the cell; used to place pieces and to anchor the pixelfx pivots.
+# Compute the pixel center `(cx, cy)` of grid cell `(row, col)`.
+# row, col: 0-based grid coordinates on the 3x6 board.
 def cell_center(row, col):
     return (GRID_X + col * TILE + TILE // 2, GRID_Y + row * TILE + TILE // 2)
 
 
-# Return the Rect of a grid cell.
-# row, col: the cell.
+# Build the bounding `pygame.Rect` of grid cell `(row, col)`.
+# row, col: 0-based grid coordinates on the 3x6 board.
 def cell_rect(row, col):
     return pygame.Rect(GRID_X + col * TILE, GRID_Y + row * TILE, TILE, TILE)
 
 
 class Game:
-    # Build the game.
-    # fast: when True (self-test) all waits collapse to 0, the human side auto-plays
-    # with a GreedyAgent and slide/dice animations are skipped so a full game can
-    # be simulated headlessly in a loop.
+    # Initialize the Pygame display, pre-bake pixel-art surfaces, and start a fresh match.
+    # fast: True only during headless fast-forward steps; False for normal 60 FPS gameplay.
     def __init__(self, fast=False):
         pygame.display.set_caption(f"Pixel Dice Ur - {AUTHOR_NAME} - {STUDENT_ID}")
         self.screen = pygame.display.set_mode((WIN_W, WIN_H))
         self.clock = pygame.time.Clock()
         self.fast = fast
-        # bake all pixel-art textures once; geometry dict feeds the baked route layer
+        p1_entry_way, p1_exit_way = self._lane_waypoints(1)
+        p2_entry_way, p2_exit_way = self._lane_waypoints(2)
         geo = {
             "win": (WIN_W, WIN_H),
             "p1_dock": P1_DOCK, "p2_dock": P2_DOCK,
             "p1_tray": P1_TRAY, "p2_tray": P2_TRAY,
-            "p1_way": self._waypoints(1), "p2_way": self._waypoints(2),
+            "p1_way": p1_entry_way + [(0, 0)] if False else p1_entry_way,
+            "p2_way": p2_entry_way,
+            "shared_way": [cell_center(1, c) for c in range(5)],
         }
+        # Combine entry and sprint segments per player cleanly for `_bake_path_layer`
         self.art = pixel_art.PixelArtBank(geo)
+        # Also paint the sprint exit arrows `7 -> 8* -> 9 -> 10 (Shrine)` onto `path_layer`!
+        self.art._dash(self.art.path_layer, p1_exit_way, (90, 218, 240, 215))
+        self.art._dash(self.art.path_layer, p2_exit_way, (240, 96, 128, 215))
         self.reset()
 
-    # Compute the route-guide waypoints for one player: dock slot -> tile 1 -> tile 2
-    # -> war-zone entry -> war-zone exit -> tile 8 -> tile 9 -> finish 10.
-    # player: 1 or 2; returns a list of (x, y) screen points.
-    def _waypoints(self, player):
+    # Build the entry (`Reserve -> 1 -> 2 -> 3`) and exit (`7 -> 8* -> 9 -> 10`) waypoint
+    # chains so every single step along the S-curve track has a visible directional arrow!
+    # player: 1 or 2; row/dock: player-specific lane row and starting dock Rect.
+    def _lane_waypoints(self, player):
         row = 0 if player == 1 else 2
         dock = P1_DOCK if player == 1 else P2_DOCK
-        return [
-            (dock.centerx, dock.centery),
+        entry = [
+            (cell_center(row, 1)[0], dock.bottom if player == 1 else dock.top),
             cell_center(row, 1),
             cell_center(row, 0),
             cell_center(1, 0),
+        ]
+        sprint = [
             cell_center(1, 4),
             cell_center(row, 4),
             cell_center(row, 5),
             cell_center(1, 5),
         ]
+        return entry, sprint
 
-    # Reset to a fresh game: new state, cleared VFX, fresh logs, decisions, dice
-    # animation and the auto-play agent. The selected P2 AI index is kept.
+    # Reset match state, animations, logs, and turn timers while keeping the chosen AI difficulty.
+    # self.ai_index: index into AGENTS selecting Expectiminimax, Minimax, or Greedy.
     def reset(self):
         if not hasattr(self, "ai_index"):
-            self.ai_index = 0          # 0=Expectiminimax, 1=Minimax, 2=Greedy
+            self.ai_index = 0
+        if not hasattr(self, "hint_on"):
+            self.hint_on = False
         self.state = GameState()
         self.vfx = VFXManager()
-        self.turns = 0                 # total completed moves
-        self.log = []
-        self.last_decision = None      # most recent AI decision (for the inspector)
-        self.rich_decision = None      # most recent AI decision that had real candidates
-        self.hint = None               # live Expectiminimax hint for the human position
-        self.hint_on = False
-        self.slides = {}               # (player, idx) -> slide animation dict
-        self.phase = "human_await_roll"
-        self.phase_ms = 0
-        self.dice_rolling = False      # 260 ms tumble animation before the VFX pops
+        self.turns = 0
+        self.log = ["Match started! Press SPACE or click ROLL."]
+        self.last_decision = None
+        self.rich_decision = None
+        self.hint = None
+        self.slides = {}
+        self.dice_rolling = False
         self.dice_roll_ms = 0
-        self.ai_roll_done = False      # AI turn: has the die been committed yet
-        self.ai_moved = False          # AI turn: has the AI applied its move yet
         self.over = False
-        self.hover_idx = None          # human piece under the cursor (target preview)
-        self.pulse = 0.0               # drives the legal-move pulsing frame
-        self.human_agent = GreedyAgent() if self.fast else None
-        # unified entry keeps phase timers + AI turn flags consistent on every reset
+        self.hover_idx = None
+        self.pulse = 0.0
+        self.human_agent = GreedyAgent()
         self._enter_phase("human_await_roll")
 
-    # Unified phase switch: every state-machine transition goes through here so the
-    # phase timer and the two AI turn flags (ai_roll_done / ai_moved) are ALWAYS
-    # reset together - a stale flag is exactly what deadlocked the fast=False AI
-    # turn in Phase 4.5.
-    # name: one of "human_await_roll" / "human_await_move" / "skip_wait" / "ai_think".
+    # Transition cleanly into a turn phase and reset all per-phase timers, hover, and AI flags.
+    # name: phase identifier ("human_await_roll", "human_await_move", "skip_wait", "ai_think").
     def _enter_phase(self, name):
         self.phase = name
         self.phase_ms = 0
         self.ai_roll_done = False
         self.ai_moved = False
+        self.hover_idx = None
 
-    # Return the centre point of one reserve-dock slot for a player.
-    # player: 1 or 2; slot: 0, 1 or 2 (the piece index).
-    # Shares pixel_art.slot_centers with the baked recesses so the sprite and the
-    # plate art can never drift apart (Phase 4.6: the old hardcoded 48/8 math cut
-    # the scored-tray slots off the 120px plate).
+    # Return the exact screen center of piece `slot` inside a player's reserve dock.
+    # player: 1 or 2; slot: piece index 0, 1, or 2.
     def dock_slot_center(self, player, slot):
-        cx, cy = pixel_art.slot_centers(P1_DOCK if player == 1 else P2_DOCK,
-                                        DOCK_SLOT, DOCK_SLOT_GAP)[slot]
-        return cx, cy
+        dock = P1_DOCK if player == 1 else P2_DOCK
+        return pixel_art.slot_center_in_rect(dock, slot)
 
-    # Return the centre point of one scored-tray slot for a player.
-    # player: 1 or 2; slot: 0, 1 or 2.
+    # Return the exact screen center of piece `slot` inside a player's scored goal tray.
+    # player: 1 or 2; slot: piece index 0, 1, or 2.
     def tray_slot_center(self, player, slot):
-        cx, cy = pixel_art.slot_centers(P1_TRAY if player == 1 else P2_TRAY,
-                                        TRAY_SLOT, TRAY_SLOT_GAP)[slot]
-        return cx, cy
+        tray = P1_TRAY if player == 1 else P2_TRAY
+        return pixel_art.slot_center_in_rect(tray, slot)
 
-    # Compute the centre screen point where a moved piece's pixelfx pivot should sit.
-    # player: 1 or 2; tile: logical destination; piece: the piece index (dock slots are
-    # per-piece, so a tile 0 event is anchored at that piece's own dock slot; the finish
-    # anchors at the scored-tray slot; lane/war tiles use their grid cell centres).
+    # Map `(player, tile, piece)` to its screen pixel anchor for rendering tokens and VFX.
+    # player: 1 or 2; tile: logical position 0..10; piece: piece index 0..2 for dock/tray slots.
     def tile_point(self, player, tile, piece=None):
         if tile == 0:
             return self.dock_slot_center(player, piece if piece is not None else 0)
         if tile == BOARD_END:
-            return self.tray_slot_center(player, piece if piece is not None else 2)
-        r, c = lane_cell(player, tile) if tile in (1, 2, 8, 9) else shared_cell(tile)
-        return cell_center(r, c)
+            return self.tray_slot_center(player, piece if piece is not None else 0)
+        cell = lane_cell(player, tile) if tile in (1, 2, 8, 9) else shared_cell(tile)
+        if cell is None:
+            return self.tray_slot_center(player, piece if piece is not None else 0)
+        return cell_center(*cell)
 
-    # Begin the dice tumble: the face flickers for ROLL_ANIM_MS then commits.
+    # Trigger the 260 ms 3D dice tumble animation before committing the random roll.
+    # self.dice_rolling/self.dice_roll_ms: animation state flags.
     def start_roll(self):
+        self.hover_idx = None
         self.dice_rolling = True
         self.dice_roll_ms = 0
 
-    # Commit the dice result once the tumble ends: set the real value, pop the
-    # dice_roll VFX at the dice face, log it, and advance the phase.
-    # player: 1 or 2, who just rolled.
+    # Finalize a dice roll after tumbling, spawn `dice_roll` VFX, and update the turn phase.
+    # player: 1 or 2 indicating who rolled; roll: sampled die outcome 1..3.
     def commit_roll(self, player):
         roll = self.state.roll_dice()
         cx, cy = self.dice_center()
         self.vfx.spawn("dice_roll", cx, cy, scale=0.55)
         self.log.append(f"P{player} rolled {roll}")
         if player == 1:
-            self.hint = self._compute_hint()     # refresh hint right after the die lands
+            self.hint = self._compute_hint()
             if not self.state.get_legal_moves():
                 self._enter_phase("skip_wait")
-                self.log.append("P1 no legal moves - Turn skipped")
+                self.log.append("P1 has no legal moves -> skipping")
             else:
                 self._enter_phase("human_await_move")
         else:
             self.ai_roll_done = True
+            self.phase_ms = 0
             if not self.state.get_legal_moves():
-                # no legal move: the AI still "plays" the skip; do_ai_move will
-                # hand the phase back to the human (current_turn becomes 1).
                 self.do_ai_move(None)
 
-    # Compute the live human hint (Expectiminimax d=4) when the hint toggle is on.
-    # Returns a dict with scores / best / targets, or None when off.
+    # Run Expectiminimax (depth=4) on the human's live position when `Hint: ON` is active.
+    # move/scores/stats: candidate evaluation results returned by ExpectiminimaxAgent.
     def _compute_hint(self):
-        if not self.hint_on or self.state.current_turn != 1:
+        if not self.hint_on or self.state.current_turn != 1 or not self.state.dice_roll:
+            return None
+        legal = self.state.get_legal_moves()
+        if not legal:
             return None
         move, scores, stats = ExpectiminimaxAgent(depth=4).choose_move(self.state)
         targets = {i: self.state.p1_pieces[i] + self.state.dice_roll for i in scores}
-        return {"scores": scores, "best": move, "targets": targets,
-                "nodes": stats["nodes"], "ms": stats["time_ms"]}
+        return {
+            "scores": scores, "best": move, "targets": targets,
+            "nodes": stats["nodes"], "ms": stats["time_ms"],
+        }
 
-    # Perform the AI's chosen move: run the selected agent, record the decision for
-    # the inspector, apply it, animate the slide and fire the event effects.
-    # move_idx: the piece index to move, or None to skip the turn.
+    # Execute the AI opponent's move, record candidate evaluations for the Inspector panel,
+    # and cleanly hand control back to the human (or re-enter `ai_think` on a bonus turn).
+    # move_idx: fallback move index (None when skipping); best/scores/stats: AI search output.
     def do_ai_move(self, move_idx):
         agent = self.make_ai_agent()
-        # decide BEFORE applying so the inspector can show every candidate score
         best, scores, stats = agent.choose_move(self.state)
         roll = self.state.dice_roll
         targets = {i: self.state.p2_pieces[i] + roll for i in scores}
+        chosen = best if best is not None else move_idx
         self.last_decision = {
             "alg": AGENTS[self.ai_index][0],
             "nodes": stats["nodes"],
@@ -303,45 +282,51 @@ class Game:
         }
         if scores:
             self.rich_decision = dict(self.last_decision)
-        self.apply_and_animate(2, best if best is not None else move_idx, roll)
+        self.apply_and_animate(2, chosen, roll)
         self.ai_moved = True
-        # Phase 4.6: hand the state machine back correctly after the AI's move.
-        # A rune landing (4/8) keeps current_turn == 2 -> the AI rolls again from a
-        # clean "ai_think"; otherwise control returns to the human player.
         if not self.over:
             if self.state.current_turn == 2:
                 self._enter_phase("ai_think")
             else:
                 self._enter_phase("human_await_roll")
 
-    # Apply a move for player to the current state, then animate the slide and trigger
-    # the four pixelfx effects according to the returned event_info dict.
-    # player: 1 or 2; idx: piece index to move or None to skip; roll: the die value used.
+    # Apply a player's move to `self.state`, start two-stage Shrine->Tray slide when scoring,
+    # and trigger the bound pixelfx animations.
+    # player: 1 or 2; idx: moved piece index 0..2 or None on skip; roll: die value 1..3.
     def apply_and_animate(self, player, idx, roll):
         pieces = self.state.p1_pieces if player == 1 else self.state.p2_pieces
         from_tile = pieces[idx] if idx is not None else -1
         self.state, ev = self.state.apply_move(idx, roll)
         self.turns += 1
         to_tile = ev["target_tile"]
-        # slide the moved piece from its old spot to the new one (skipped in fast mode)
+        shrine_pt = cell_center(1, 5)
         if idx is not None and not self.fast:
             from_pt = self.tile_point(player, from_tile, idx)
             to_pt = self.tile_point(player, to_tile, idx)
-            self.slides[(player, idx)] = {"from": from_pt, "to": to_pt, "t": 0}
-        # event effects, anchored at the destination cell (dock slot for sends-back)
-        cx, cy = self.tile_point(player, to_tile, idx) if to_tile >= 0 else (WIN_W // 2, WIN_H // 2)
+            via_pt = shrine_pt if to_tile == BOARD_END else None
+            self.slides[(player, idx)] = {"from": from_pt, "via": via_pt, "to": to_pt, "t": 0.0}
+        if to_tile == BOARD_END:
+            cx, cy = shrine_pt
+            tray_x, tray_y = self.tray_slot_center(player, idx if idx is not None else 0)
+        elif to_tile >= 0:
+            cx, cy = self.tile_point(player, to_tile, idx)
+            tray_x, tray_y = cx, cy
+        else:
+            cx, cy = WIN_W // 2, WIN_H // 2
+            tray_x, tray_y = cx, cy
         if ev["captured"]:
             self.vfx.spawn("hit_explosion", cx, cy, scale=0.65)
         if ev["bonus_turn"]:
             self.vfx.spawn("rune_glow", cx, cy, scale=0.75)
         if ev["scored"]:
             self.vfx.spawn("score_burst", cx, cy, scale=0.75)
+            if idx is not None:
+                self.vfx.spawn("score_burst", tray_x, tray_y, scale=0.55)
         if self.state.is_terminal():
             self.over = True
-            # celebrate a win with two extra offset score_bursts
-            self.vfx.spawn("score_burst", cx - 40, cy - 20, scale=0.7)
-            self.vfx.spawn("score_burst", cx + 40, cy - 20, scale=0.7)
-        # battle log line
+            self.hover_idx = None
+            self.vfx.spawn("score_burst", cx - 45, cy - 20, scale=0.75)
+            self.vfx.spawn("score_burst", cx + 45, cy - 20, scale=0.75)
         if idx is not None:
             tags = []
             if ev["captured"]:
@@ -350,71 +335,65 @@ class Game:
                 tags.append("BONUS TURN!")
             if ev["scored"]:
                 tags.append("SCORED!")
-            self.log.append(f"P{player} piece #{idx+1} to tile {to_tile}" + (f" ({', '.join(tags)})" if tags else ""))
+            suffix = f" ({', '.join(tags)})" if tags else ""
+            self.log.append(f"P{player} #{idx+1} -> tile {to_tile}{suffix}")
         else:
-            self.log.append(f"P{player} no legal moves - skipped")
+            self.log.append(f"P{player} no legal moves -> skipped")
         self.log = self.log[-40:]
 
-    # Build the AI agent currently selected for P2.
-    # Returns a fresh agent of the class at self.ai_index (depth 4 for the two searchers).
+    # Instantiate the currently selected AI agent class for Player 2.
+    # cls: GreedyAgent, DeterministicMinimaxAgent, or ExpectiminimaxAgent.
     def make_ai_agent(self):
         cls = AGENTS[self.ai_index][1]
-        if cls.__name__ == "GreedyAgent":
-            return cls()
-        return cls(depth=4)
+        return cls() if cls is GreedyAgent else cls(depth=4)
 
-    # Return the centre of the dice face on the right panel (dice_roll effect anchor).
-    # Must match the dice sprite drawn in draw_dice_log.
+    # Return the screen pixel center of the 3D dice cube on the lower-right console.
+    # x0, y0: top-left origin of the lower-right panel.
     def dice_center(self):
         x0 = LEFT_W + 10
         y0 = BANNER_H + 344
-        return (x0 + 76, y0 + 92)
+        return (x0 + 72, y0 + 88)
 
-    # Human roll: start the 260 ms dice tumble (commits inside update()).
+    # Start the human player's dice roll animation when allowed.
     def human_roll(self):
-        if not self.dice_rolling:
+        if not self.dice_rolling and self.phase == "human_await_roll":
             self.start_roll()
 
-    # Human move: apply the chosen piece and animate/effects; on a bonus turn the
-    # human rolls again, otherwise the turn passes to the AI.
-    # idx: piece index to move (must be in get_legal_moves()).
+    # Commit the human player's chosen piece move and transition to bonus roll or AI turn.
+    # idx: chosen legal piece index 0, 1, or 2.
     def human_move(self, idx):
+        self.hover_idx = None
         self.apply_and_animate(1, idx, self.state.dice_roll)
         self.hint = None
         if not self.over:
             if self.state.current_turn == 1:
-                self._enter_phase("human_await_roll")    # bonus turn: roll again
+                self._enter_phase("human_await_roll")
             else:
                 self._enter_phase("ai_think")
 
-    # Advance the game one update tick.
-    # dt_ms: real milliseconds since the previous update; drives timers, slides,
-    # the dice tumble, VFX and the pulse.
+    # Advance animations, VFX, dice tumbles, and turn timers by `dt_ms` milliseconds.
+    # dt_ms: elapsed frame time in ms; dt: 0 in headless fast-forward mode, else dt_ms.
     def update(self, dt_ms):
         dt = 0 if self.fast else dt_ms
-        self.pulse += (0 if self.fast else dt_ms) * 0.005
-        self.vfx.update(dt)
-        # progress slide animations
+        if not self.fast:
+            self.pulse += dt_ms * 0.005
+        self.vfx.update(dt_ms if self.fast else dt)
         if self.slides:
             for key in list(self.slides):
                 s = self.slides[key]
+                dur = SLIDE_MS * 1.6 if s.get("via") else SLIDE_MS
                 s["t"] += dt
-                if s["t"] >= SLIDE_MS:
+                if s["t"] >= dur:
                     del self.slides[key]
         if self.over:
             return
-        # dice tumble: flicker the face for ROLL_ANIM_MS then commit the real roll
         if self.dice_rolling:
             self.dice_roll_ms += dt
             if self.dice_roll_ms >= ROLL_ANIM_MS:
                 self.dice_rolling = False
                 self.commit_roll(self.state.current_turn)
             return
-        self.phase_ms += dt
         if self.fast:
-            # auto-drive whichever side is to move with zero delay and no flags:
-            # a fresh die is rolled at the start of every side's turn (bonus turns
-            # keep current_turn, so this simply fires again with a new value).
             if self.state.current_turn == 1:
                 roll = self.state.roll_dice()
                 self.vfx.spawn("dice_roll", *self.dice_center(), scale=0.55)
@@ -422,301 +401,357 @@ class Game:
                 legal = self.state.get_legal_moves()
                 if not legal:
                     self.apply_and_animate(1, None, roll)
+                    if not self.over and self.state.current_turn == 2:
+                        self._enter_phase("ai_think")
                 else:
                     move, _, _ = self.human_agent.choose_move(self.state)
-                    self.human_move(move if move is not None else None)
+                    self.human_move(move)
             else:
                 roll = self.state.roll_dice()
                 self.vfx.spawn("dice_roll", *self.dice_center(), scale=0.55)
                 self.log.append(f"P2 rolled {roll}")
-                agent = self.make_ai_agent()
-                best, scores, stats = agent.choose_move(self.state)
-                targets = {i: self.state.p2_pieces[i] + roll for i in scores}
-                self.last_decision = {
-                    "alg": AGENTS[self.ai_index][0], "nodes": stats["nodes"],
-                    "ms": stats["time_ms"], "scores": scores, "best": best,
-                    "targets": targets, "eval_p1": evaluate_state(self.state, 1),
-                }
-                if scores:
-                    self.rich_decision = dict(self.last_decision)
-                self.apply_and_animate(2, best, roll)
+                self.do_ai_move(None)
             return
-        # normal (human vs AI) pacing
+        self.phase_ms += dt
         if self.phase == "ai_think":
             if not self.ai_roll_done:
                 if self.phase_ms >= AI_ROLL_WAIT_MS:
                     self.start_roll()
             elif not self.ai_moved:
-                if self.phase_ms >= AI_ROLL_WAIT_MS + AI_MOVE_WAIT_MS + ROLL_ANIM_MS:
+                if self.phase_ms >= AI_MOVE_WAIT_MS:
                     self.do_ai_move(None)
         elif self.phase == "skip_wait":
             if self.phase_ms >= HUMAN_PAUSE_MS:
                 self.apply_and_animate(1, None, self.state.dice_roll)
                 self.hint = None
-                if not self.over and self.state.current_turn == 2:
-                    self._enter_phase("ai_think")
+                if not self.over:
+                    if self.state.current_turn == 2:
+                        self._enter_phase("ai_think")
+                    else:
+                        self._enter_phase("human_await_roll")
 
-    # Return the screen position to render a piece at, honouring any active slide.
-    # player, idx: which piece; dock pieces sit in their own slot, scored pieces in
-    # their tray slot, mid-slide pieces get the interpolated position, and shared
-    # tiles nudge P1 up / P2 down so two opponents stay visible on one tile.
+    # Compute the current pixel center `(cx, cy)` of piece `(player, idx)`, smoothly
+    # passing through the Golden Shrine `(1, 5)` first whenever a piece reaches `10`!
+    # player: 1 or 2; idx: piece index 0..2; f: normalized slide interpolation progress.
     def piece_pos(self, player, idx):
         key = (player, idx)
         if key in self.slides:
             s = self.slides[key]
+            if s.get("via"):
+                dur = SLIDE_MS * 1.6
+                f = min(1.0, s["t"] / dur)
+                if f < 0.55:
+                    u = f / 0.55
+                    x = s["from"][0] + (s["via"][0] - s["from"][0]) * u
+                    y = s["from"][1] + (s["via"][1] - s["from"][1]) * u
+                else:
+                    u = (f - 0.55) / 0.45
+                    x = s["via"][0] + (s["to"][0] - s["via"][0]) * u
+                    y = s["via"][1] + (s["to"][1] - s["via"][1]) * u
+                return (int(x), int(y))
             f = min(1.0, s["t"] / SLIDE_MS)
             x = s["from"][0] + (s["to"][0] - s["from"][0]) * f
             y = s["from"][1] + (s["to"][1] - s["from"][1]) * f
-            return int(x), int(y)
+            return (int(x), int(y))
         tile = (self.state.p1_pieces if player == 1 else self.state.p2_pieces)[idx]
         if tile == 0:
             return self.dock_slot_center(player, idx)
         if tile == BOARD_END:
             return self.tray_slot_center(player, idx)
         cx, cy = self.tile_point(player, tile, idx)
-        enemy = 2 if player == 1 else 1
-        enemy_tiles = self.state.p2_pieces if enemy == 2 else self.state.p1_pieces
-        if enemy_tiles.count(tile) and tile in (3, 4, 5, 6, 7, 10):
+        enemy_tiles = self.state.p2_pieces if player == 1 else self.state.p1_pieces
+        if tile in enemy_tiles and tile in (3, 4, 5, 6, 7):
             cy = cy - 9 if player == 1 else cy + 9
-        return cx, cy
+        return (cx, cy)
 
-    # ---- rendering ----
+    # Render one complete frame in strict back-to-front layer order before flipping display.
+    # ox, oy: current screen-shake offset applied to board elements; VFX applies its own internally.
     def render(self):
-        self.screen.fill((20, 18, 30))
+        self.screen.fill((18, 16, 28))
         self.draw_stars()
-        ox, oy = self.vfx.get_shake_offset()   # board + pieces follow the shake
+        ox, oy = self.vfx.get_shake_offset()
         self.draw_board(ox, oy)
-        self.draw_pieces(ox, oy)
-        # target preview MUST be drawn before the flip inside this function so it
-        # actually reaches the screen (drawn over the tiles, under the VFX layer)
         self.draw_target_preview(ox, oy)
+        self.draw_pieces(ox, oy)
+        self.draw_legend()
         self.draw_banner()
         self.draw_turn_banner()
         self.draw_inspector()
         self.draw_dice_log()
-        # VFX draws with offset=(0,0): it already adds the shake internally, so the
-        # effects do not get a double shake on top of the board's own offset
         self.vfx.draw(self.screen, (0, 0))
         if self.over:
             self.draw_game_over()
         pygame.display.flip()
 
-    # Draw the ambient stardust: every star's position drifts up over time and its
-    # brightness follows a twinkle sine, so the idle screen still breathes.
+    # Render twinkling upward-drifting background stardust motes.
+    # t: current animation time phase; y/alpha: wrapped vertical coordinate and star opacity.
     def draw_stars(self):
         t = self.pulse
+        usable_h = WIN_H - BANNER_H
         for star in self.art.stars:
-            y = int(star["y"] - (t * star["spd"] * 0.06) % WIN_H)
-            alpha = int(40 + 36 * (1.0 + math.sin(t * 0.8 + star["ph"])) / 2.0)
+            y = BANNER_H + int((star["y"] - BANNER_H - t * star["spd"] * 3.0) % usable_h)
+            alpha = int(38 + 42 * (1.0 + math.sin(t * 1.4 + star["ph"])) * 0.5)
             surf = pixel_art.draw_star_surface(star, alpha)
             self.screen.blit(surf, (star["x"], y))
 
-    # Draw the board: baked tile textures for every logical cell (cells (0,3) and
-    # (2,3) are skipped - the hourglass / I-shape board has no tiles there), the
-    # baked route-guide layer, the dock/tray plates and the breathing rune glow.
-    # ox, oy: the screen-shake offset applied to every board element.
+    # Draw the hourglass 14-tile Babylonian board, crisp tile badges, S-curve directional
+    # arrows ON TOP OF tile seams, non-overlapping docks/trays, and breathing rune halos.
+    # ox, oy: integer screen-shake pixel offsets; tier: integer glow level in {1, 2, 3}.
     def draw_board(self, ox, oy):
-        self.screen.blit(self.art.path_layer, (ox, oy))
+        board_frame = pygame.Rect(ox + GRID_X - 10, oy + GRID_Y - 10, 6 * TILE + 20, 3 * TILE + 20)
+        pygame.draw.rect(self.screen, (26, 22, 38), board_frame, border_radius=8)
+        pygame.draw.rect(self.screen, (96, 80, 52), board_frame, 2, border_radius=8)
         for row in range(3):
             for col in range(6):
                 if row in (0, 2) and col in (2, 3):
-                    continue                  # side rows: no tiles where the dock and the gap sit
+                    continue
                 kind = TILE_KIND[(row, col)]
                 rect = pygame.Rect(ox + GRID_X + col * TILE, oy + GRID_Y + row * TILE, TILE, TILE)
                 self.screen.blit(self.art.tiles[kind], rect)
                 label = TILE_LABEL.get((row, col))
                 if label:
-                    self.screen.blit(get_font(15).render(label, True, TEXT_DIM), (rect.x + 5, rect.y + 4))
-        # dock + tray plates (baked backgrounds) with their slot occupants
+                    lbl_col = GOLD if ("*" in label or label == "10") else TEXT
+                    txt_s = get_font(14).render(label, True, lbl_col)
+                    pill = pygame.Rect(rect.x + 4, rect.y + 4, txt_s.get_width() + 6, txt_s.get_height() + 2)
+                    pygame.draw.rect(self.screen, (16, 14, 24), pill, border_radius=3)
+                    self.screen.blit(txt_s, (pill.x + 3, pill.y + 1))
+        # Drawn AFTER tiles so every directional chevron arrow across tile seams is 100% visible!
+        self.screen.blit(self.art.path_layer, (ox, oy))
         self.screen.blit(self.art.docks[1], (ox + P1_DOCK.x, oy + P1_DOCK.y))
         self.screen.blit(self.art.docks[2], (ox + P2_DOCK.x, oy + P2_DOCK.y))
         self.screen.blit(self.art.trays[1], (ox + P1_TRAY.x, oy + P1_TRAY.y))
         self.screen.blit(self.art.trays[2], (ox + P2_TRAY.x, oy + P2_TRAY.y))
-        # breathing glow on the two rune tiles (4 middle, 8 top/bottom lane ends)
-        # Phase 4.6: self.pulse is a float - the old `pulse // 10 % 3` produced a
-        # float index (TypeError on list access) once the pulse left 0.0.
-        tier = 1 + int(self.pulse * 2) % 3
+        tier = 1 + (int(self.pulse * 1.5) % 3)
         glow = self.art.glow[tier]
         for r, c in ((1, 1), (0, 4), (2, 4)):
             cx, cy = cell_center(r, c)
             self.screen.blit(glow, (cx + ox - 32, cy + oy - 32))
 
-    # Draw all six pieces at their current (possibly sliding) positions using the
-    # baked token sprites; legal human pieces get a pulsing highlight box.
-    # ox, oy: the screen-shake offset.
+    # Draw all six player tokens and pulsing selection rings around movable human pieces.
+    # ox, oy: screen-shake offsets; legal: list of movable piece indices for Player 1.
     def draw_pieces(self, ox, oy):
+        legal = (
+            self.state.get_legal_moves()
+            if (not self.over and self.state.current_turn == 1 and self.phase == "human_await_move")
+            else []
+        )
         for player in (1, 2):
-            pieces = self.state.p1_pieces if player == 1 else self.state.p2_pieces
-            legal = self.state.get_legal_moves() if (player == 1 and self.phase in ("human_await_move", "skip_wait")) else []
             for idx in range(3):
                 cx, cy = self.piece_pos(player, idx)
                 cx, cy = cx + ox, cy + oy
                 token = self.art.tokens[(player, idx)]
                 self.screen.blit(token, (cx - 20, cy - 17))
-                if idx in legal:
-                    glow = 20 + int(5 * math.sin(self.pulse))
-                    pygame.draw.rect(self.screen, HI, pygame.Rect(cx - glow, cy - glow, glow * 2, glow * 2), 2, border_radius=6)
+                if player == 1 and idx in legal:
+                    rad = 19 + int(3 * math.sin(self.pulse * 2.2))
+                    col = GOLD if idx == self.hover_idx else HI
+                    pygame.draw.circle(self.screen, col, (cx, cy - 2), rad, 2)
 
-    # Draw the top banner: title + author on the left, AI/New-Game buttons on the
-    # right (both with hover states driven by the mouse position).
+    # Draw the bottom-left tactical rules & route legend strip (zero overlap with docks).
+    # l1, l2: concise quick-reference strings for players and markers.
+    def draw_legend(self):
+        pixel_art.draw_panel(self.screen, LEGEND_RECT)
+        f = get_font(13)
+        l1 = "ROUTE: Reserve -> 1 -> 2 -> War Zone (3..7) -> Sprint (8* -> 9) -> Golden Shrine (10)!"
+        l2 = "RULES: Tiles 3,5,6,7 = Capture Foe   |   Tiles 4* & 8* = Bonus Turn (Tile 4* = Shield)"
+        self.screen.blit(f.render(l1, True, TEXT), (LEGEND_RECT.x + 12, LEGEND_RECT.y + 14))
+        self.screen.blit(f.render(l2, True, GOLD), (LEGEND_RECT.x + 12, LEGEND_RECT.y + 38))
+
+    # Draw the mandatory top banner showing game title, author name, student ID, and quick buttons.
+    # hover: current mouse coordinate tuple used for button highlight feedback.
     def draw_banner(self):
         hover = pygame.mouse.get_pos() if not self.fast else (-1, -1)
         pixel_art.draw_panel(self.screen, pygame.Rect(0, 0, WIN_W, BANNER_H))
-        self.screen.blit(get_font(24).render(BANNER_TEXT, True, TEXT), (14, 10))
-        self.btn_ai = pygame.Rect(WIN_W - 340, 10, 160, 28)
-        pixel_art.draw_button(self.screen, self.btn_ai, f"AI: {AGENTS[self.ai_index][0]}", BTN_BLUE,
-                              self.btn_ai.collidepoint(hover))
-        self.btn_new = pygame.Rect(WIN_W - 168, 10, 154, 28)
-        pixel_art.draw_button(self.screen, self.btn_new, "New Game (R)", BTN_RED,
-                              self.btn_new.collidepoint(hover))
+        self.screen.blit(get_font(19).render(BANNER_TEXT, True, GOLD), (14, 14))
+        self.btn_ai = pygame.Rect(WIN_W - 356, 10, 182, 28)
+        pixel_art.draw_button(
+            self.screen, self.btn_ai, f"AI: {AGENTS[self.ai_index][0]}",
+            BTN_BLUE, self.btn_ai.collidepoint(hover)
+        )
+        self.btn_new = pygame.Rect(WIN_W - 164, 10, 150, 28)
+        pixel_art.draw_button(
+            self.screen, self.btn_new, "New Game (R)",
+            BTN_RED, self.btn_new.collidepoint(hover)
+        )
 
-    # Draw the turn-status banner under the board so the current owner and the
-    # expected action are never ambiguous.
+    # Draw the centered turn-status badge cleanly at the top of the left board area (y=56..84).
+    # text, col: status prompt string and its corresponding highlight RGB color.
     def draw_turn_banner(self):
-        ox, oy = self.vfx.get_shake_offset()
         if self.over:
-            text, col = "GAME OVER", GOLD
+            w = self.state.get_winner()
+            text = "VICTORY! PLAYER 1 WINS!" if w == 1 else "DEFEAT! AI PLAYER 2 WINS!"
+            col = GOLD
         elif self.state.current_turn == 1:
             if self.dice_rolling:
-                text, col = "ROLLING...", P1_FILL
+                text, col = "ROLLING RUNES...", P1_FILL
             elif self.phase == "human_await_roll":
-                text, col = "YOUR TURN - ROLL DICE", P1_FILL
+                text, col = "YOUR TURN  -  PRESS [SPACE] OR CLICK ROLL", P1_FILL
             elif self.phase == "human_await_move":
-                text, col = "YOUR TURN - SELECT A PIECE", P1_FILL
+                text, col = f"ROLLED [{self.state.dice_roll}]  -  CLICK A GLOWING PIECE OR TARGET TILE", HI
             else:
-                text, col = "NO LEGAL MOVES - TURN SKIPPED", TEXT_DIM
+                text, col = f"ROLLED [{self.state.dice_roll}]  -  NO LEGAL MOVES, SKIPPING...", TEXT_DIM
         else:
-            text, col = "AI THINKING...", P2_FILL
-        f = get_font(20)
-        surf = f.render(text, True, col)
-        x = 10 + (LEFT_W - surf.get_width()) // 2 + ox
-        y = TURN_BANNER_Y + oy
-        pygame.draw.rect(self.screen, (30, 28, 44), pygame.Rect(x - 10, y - 3, surf.get_width() + 20, surf.get_height() + 7), 2)
-        self.screen.blit(surf, (x, y))
+            text, col = "AI OPPONENT IS EVALUATING CONSEQUENCES...", P2_FILL
+        badge = pygame.Rect(GRID_X, BANNER_H + 8, 6 * TILE, 28)
+        pygame.draw.rect(self.screen, (28, 26, 44), badge, border_radius=5)
+        pygame.draw.rect(self.screen, col, badge, 2, border_radius=5)
+        surf = get_font(15).render(text, True, col)
+        self.screen.blit(surf, (badge.centerx - surf.get_width() // 2, badge.centery - surf.get_height() // 2))
 
-    # Draw the AI Decision Inspector panel on the right.
-    # Shows: the human hint (when ON) in cyan with [RECOMMENDED], the most recent
-    # AI decision (algorithm / nodes / time / evaluation bar / candidate scores),
-    # and the Hint toggle button.
+    # Draw the right-hand AI Decision Inspector panel showing candidate move evaluations
+    # and the optional live Expectiminimax human advisor (`Advisor Hint: ON`).
+    # x0, pw, panel: panel geometry; d: last AI decision dictionary; h: human hint dictionary.
     def draw_inspector(self):
         x0 = LEFT_W + 10
         pw = WIN_W - x0 - 10
-        panel = pygame.Rect(x0, BANNER_H + 10, pw, 320)
+        panel = pygame.Rect(x0, BANNER_H + 10, pw, 322)
         pixel_art.draw_panel(self.screen, panel)
-        pixel_art.draw_title(self.screen, x0 + 14, BANNER_H + 16, pw - 28, "AI DECISION INSPECTOR", GOLD)
-        y = BANNER_H + 56
-        # live human hint block (only when the toggle is ON and P1 is choosing)
+        pixel_art.draw_title(self.screen, x0 + 14, BANNER_H + 18, pw - 28, "AI DECISION INSPECTOR", GOLD)
+        y = BANNER_H + 48
         if self.hint:
             h = self.hint
-            self.screen.blit(get_font(18).render(f"[HUMAN HINT - Expectiminimax d=4]  {h['nodes']} nodes  {h['ms']:.1f} ms", True, P1_FILL), (x0 + 14, y))
-            y += 20
+            hdr = f"[ADVISOR: Expectiminimax d=4] ({h['nodes']} nd, {h['ms']:.1f}ms)"
+            self.screen.blit(get_font(14).render(hdr, True, P1_FILL), (x0 + 14, y))
+            y += 18
             for idx in range(3):
                 if idx not in h["scores"]:
                     continue
-                mark = " [RECOMMENDED]" if idx == h["best"] else ""
-                line = f"#{idx+1} -> tile {h['targets'][idx]}   {h['scores'][idx]:+7.1f}{mark}"
-                color = P1_FILL if idx == h["best"] else TEXT
-                self.screen.blit(get_font(17).render(line, True, color), (x0 + 14, y))
-                y += 19
-            y += 4
-        # most recent AI decision
+                is_best = (idx == h["best"])
+                tag = " [RECOMMENDED]" if is_best else ""
+                line = f"  Piece #{idx+1} -> Tile {h['targets'][idx]}: {h['scores'][idx]:+6.1f}{tag}"
+                self.screen.blit(get_font(14).render(line, True, HI if is_best else TEXT), (x0 + 14, y))
+                y += 17
+            y += 6
         d = self.last_decision
         if d:
-            self.screen.blit(get_font(18).render(f"Last AI - {d['alg']}: {d['nodes']} nodes, {d['ms']:.2f} ms", True, TEXT), (x0 + 14, y))
-            y += 22
-            val = max(-1000, min(1000, d["eval_p1"]))
-            bar = pygame.Rect(x0 + 14, y, pw - 28, 14)
-            mid = bar.centerx
-            pygame.draw.rect(self.screen, (40, 38, 54), bar)
-            w = abs(val) / 1000 * bar.width // 2
-            if val >= 0:
-                pygame.draw.rect(self.screen, P1_FILL, (bar.x, bar.y, w, bar.height))
-            else:
-                pygame.draw.rect(self.screen, P2_FILL, (mid - w, bar.y, w, bar.height))
-            pygame.draw.line(self.screen, TEXT_DIM, (mid, bar.y - 2), (mid, bar.y + bar.height + 2), 1)
-            self.screen.blit(get_font(13).render("P1 lead" if val >= 0 else "P2 lead", True, TEXT_DIM), (bar.right - 52, y - 14))
+            self.screen.blit(
+                get_font(15).render(f"AI ({d['alg']}): {d['nodes']} nodes | {d['ms']:.2f} ms", True, TEXT),
+                (x0 + 14, y)
+            )
             y += 20
-            self.screen.blit(get_font(15).render("Candidate Move Scores", True, TEXT_DIM), (x0 + 14, y))
-            y += 16
-            best = d["best"]
-            for idx in range(3):
-                if idx not in d["scores"]:
-                    continue
-                score = d["scores"][idx]
-                mark = " [BEST]" if idx == best else ""
-                line = f"#{idx+1} -> tile {d['targets'].get(idx, '?')}   {score:+7.1f}{mark}"
-                color = HI if idx == best else TEXT
-                self.screen.blit(get_font(17).render(line, True, color), (x0 + 14, y))
-                bw = int(90 * max(0.0, min(1.0, (score + 200) / 400)))
-                pygame.draw.rect(self.screen, GREEN if score >= 0 else RED, (bar.right - bw, y + 4, bw, 5))
-                y += 19
+            val = max(-1000.0, min(1000.0, float(d["eval_p1"])))
+            bar = pygame.Rect(x0 + 14, y, pw - 28, 12)
+            mid = bar.centerx
+            pygame.draw.rect(self.screen, (18, 16, 28), bar, border_radius=3)
+            pygame.draw.rect(self.screen, (82, 76, 110), bar, 1, border_radius=3)
+            w = int(abs(val) / 1000.0 * (bar.width // 2))
+            if val >= 0:
+                pygame.draw.rect(self.screen, P1_FILL, (mid, bar.y + 1, w, bar.height - 2))
+            else:
+                pygame.draw.rect(self.screen, P2_FILL, (mid - w, bar.y + 1, w, bar.height - 2))
+            pygame.draw.line(self.screen, GOLD, (mid, bar.y - 2), (mid, bar.bottom + 2), 2)
+            lead_txt = f"Board Eval: {'P1' if val >= 0 else 'P2'} ({val:+.1f})"
+            self.screen.blit(get_font(13).render(lead_txt, True, TEXT_DIM), (x0 + 14, y + 15))
+            y += 34
+            self.screen.blit(get_font(14).render("Evaluated AI Candidate Moves:", True, GOLD), (x0 + 14, y))
+            y += 18
+            if d["scores"]:
+                for idx in range(3):
+                    if idx not in d["scores"]:
+                        continue
+                    score = d["scores"][idx]
+                    is_best = (idx == d["best"])
+                    mark = " [BEST]" if is_best else ""
+                    line = f"Piece #{idx+1} -> Tile {d['targets'].get(idx, '?')}  {score:+7.1f}{mark}"
+                    self.screen.blit(get_font(14).render(line, True, HI if is_best else TEXT), (x0 + 14, y))
+                    bw = max(4, int(72 * max(0.0, min(1.0, (score + 200.0) / 400.0))))
+                    pygame.draw.rect(
+                        self.screen, GREEN if score >= 0 else RED,
+                        (panel.right - 14 - bw, y + 4, bw, 6), border_radius=2
+                    )
+                    y += 19
+            else:
+                self.screen.blit(get_font(14).render("No legal moves on last AI roll.", True, TEXT_DIM), (x0 + 14, y))
         else:
-            self.screen.blit(get_font(18).render("Waiting for the AI to decide...", True, TEXT_DIM), (x0 + 14, y))
-        self.btn_hint = pygame.Rect(x0 + 14, panel.bottom - 32, 150, 24)
+            self.screen.blit(
+                get_font(15).render("Roll & move to watch AI evaluate all paths...", True, TEXT_DIM),
+                (x0 + 14, y)
+            )
+        self.btn_hint = pygame.Rect(x0 + 14, panel.bottom - 34, 168, 24)
         hover = pygame.mouse.get_pos() if not self.fast else (-1, -1)
-        pixel_art.draw_button(self.screen, self.btn_hint, f"Hint: {'ON' if self.hint_on else 'OFF'}", BTN_BLUE,
-                              self.btn_hint.collidepoint(hover))
+        pixel_art.draw_button(
+            self.screen, self.btn_hint, f"Advisor Hint: {'ON' if self.hint_on else 'OFF'}",
+            BTN_BLUE, self.btn_hint.collidepoint(hover)
+        )
 
-    # Draw the dice console (3D pixel dice + ROLL button + probabilities) and the
-    # battle log (last 6 events, right column of the lower panel).
+    # Draw the lower-right 3D dice console, ROLL button, probability distribution, and battle log.
+    # x0, y0, panel: console panel coordinates; face/bounce: animated 3D die state.
     def draw_dice_log(self):
         x0 = LEFT_W + 10
-        y0 = BANNER_H + 344
+        y0 = BANNER_H + 342
         panel = pygame.Rect(x0, y0, WIN_W - x0 - 10, WIN_H - y0 - 10)
         pixel_art.draw_panel(self.screen, panel)
-        pixel_art.draw_title(self.screen, x0 + 14, y0 + 10, 190, "DICE & BATTLE LOG", GOLD)
+        pixel_art.draw_title(self.screen, x0 + 14, y0 + 10, panel.width - 28, "DICE & BATTLE LOG", GOLD)
         dx, dy = self.dice_center()
-        can_roll = (not self.over and not self.fast
-                    and self.state.current_turn == 1 and self.phase == "human_await_roll")
-        # face: "?" before the first roll, a random flicker mid-tumble, the real value after
-        face = 0
+        can_roll = (
+            not self.over and not self.fast and not self.dice_rolling
+            and self.state.current_turn == 1 and self.phase == "human_await_roll"
+        )
         if self.dice_rolling:
-            face = 1 + int((self.dice_roll_ms * 7) % 3)
-        elif self.state.dice_roll and not self.state.is_terminal():
-            face = self.state.dice_roll
-        if self.state.is_terminal():
-            face = self.state.dice_roll or 1
-        # light bounce while tumbling: the sprite rises up to 4 px near the midpoint
-        bounce = int(4 * abs(math.sin(self.dice_roll_ms / ROLL_ANIM_MS * math.pi))) if self.dice_rolling else 0
-        die = self.art.dice[face]
-        self.screen.blit(die, (dx - 36, dy - 36 - bounce))
-        self.btn_roll = pygame.Rect(dx - 62, dy + 44, 124, 26)
+            face = 1 + (int(self.dice_roll_ms // 45) % 3)
+            bounce = int(6 * abs(math.sin(self.dice_roll_ms / float(ROLL_ANIM_MS) * math.pi)))
+        else:
+            face = self.state.dice_roll if self.state.dice_roll in (1, 2, 3) else 0
+            bounce = 0
+        self.screen.blit(self.art.dice[face], (dx - 36, dy - 36 - bounce))
+        self.btn_roll = pygame.Rect(dx - 58, dy + 38, 116, 28)
         hover = pygame.mouse.get_pos() if not self.fast else (-1, -1)
-        pixel_art.draw_button(self.screen, self.btn_roll, "ROLL (Space)", (44, 84, 52),
-                              self.btn_roll.collidepoint(hover), can_roll)
-        self.screen.blit(get_font(14).render("P(1)=25% P(2)=50% P(3)=25%", True, TEXT_DIM), (dx - 58, dy + 78))
-        # right column: battle log (last 6, newest at the bottom)
-        lx = x0 + 170
-        ly = y0 + 44
-        self.screen.blit(get_font(15).render("Last events:", True, TEXT_DIM), (lx, ly))
+        pixel_art.draw_button(
+            self.screen, self.btn_roll, "ROLL (Space)", (42, 92, 56),
+            self.btn_roll.collidepoint(hover), can_roll
+        )
+        self.screen.blit(get_font(12).render("1:25%  2:50%  3:25%", True, TEXT_DIM), (dx - 56, dy + 72))
+        lx = x0 + 142
+        ly = y0 + 42
+        self.screen.blit(get_font(13).render("Recent Battle Events:", True, GOLD), (lx, ly))
         ly += 18
-        for line in self.log[-6:]:
-            self.screen.blit(get_font(15).render(line[:34], True, TEXT), (lx, ly))
-            ly += 20
+        for line in self.log[-7:]:
+            col = HI if ("CAPTURED" in line or "BONUS" in line or "SCORED" in line) else TEXT
+            self.screen.blit(get_font(13).render(line[:33], True, col), (lx, ly))
+            ly += 18
 
-    # Draw the semi-transparent game-over overlay with the winner and a play-again button.
+    # Draw the modal victory/defeat overlay when all 3 pieces of either player score.
+    # winner: 1 (human) or 2 (AI); box: centered modal panel Rect.
     def draw_game_over(self):
         dim = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-        dim.fill((0, 0, 0, 170))
+        dim.fill((0, 0, 0, 175))
         self.screen.blit(dim, (0, 0))
-        box = pygame.Rect(WIN_W // 2 - 210, WIN_H // 2 - 120, 420, 240)
+        box = pygame.Rect(WIN_W // 2 - 220, WIN_H // 2 - 115, 440, 230)
         pixel_art.draw_panel(self.screen, box)
         winner = self.state.get_winner()
-        who = "P1 (HUMAN)" if winner == 1 else "P2 (AI)"
+        who = "PLAYER 1 (HUMAN) WINS!" if winner == 1 else "PLAYER 2 (AI) WINS!"
         col = P1_FILL if winner == 1 else P2_FILL
-        f = get_font(40)
-        surf = f.render(f"{who} WINS!", True, col)
-        self.screen.blit(surf, (box.centerx - surf.get_width() // 2, box.y + 34))
-        t = get_font(22).render(f"Total turns: {self.turns}", True, TEXT)
-        self.screen.blit(t, (box.centerx - t.get_width() // 2, box.y + 94))
-        self.btn_again = pygame.Rect(box.centerx - 95, box.y + 148, 190, 40)
+        title = get_font(28).render(who, True, col)
+        self.screen.blit(title, (box.centerx - title.get_width() // 2, box.y + 38))
+        sub = get_font(18).render(f"Completed in {self.turns} total turns", True, TEXT)
+        self.screen.blit(sub, (box.centerx - sub.get_width() // 2, box.y + 92))
+        self.btn_again = pygame.Rect(box.centerx - 100, box.y + 146, 200, 40)
         hover = pygame.mouse.get_pos() if not self.fast else (-1, -1)
-        pixel_art.draw_button(self.screen, self.btn_again, "Play Again (R)", (44, 84, 52),
-                              self.btn_again.collidepoint(hover))
+        pixel_art.draw_button(
+            self.screen, self.btn_again, "Play Again (R)", (42, 92, 56),
+            self.btn_again.collidepoint(hover)
+        )
 
-    # Handle one mouse press: buttons first, then legal pieces, then the hovered
-    # target-preview cell (clicking the preview directly also moves the piece).
-    # pos: (x, y) click coordinate.
+    # Resolve which legal human piece corresponds to a given mouse `(x, y)` position,
+    # matching either the piece token itself OR its destination board cell / goal tray!
+    # pos: `(x, y)` screen coordinate; legal: list of currently movable P1 piece indices.
+    def _pick_human_piece_at(self, pos):
+        if self.over or self.state.current_turn != 1 or self.phase != "human_await_move" or self.dice_rolling:
+            return None
+        legal = self.state.get_legal_moves()
+        for idx in legal:
+            cx, cy = self.piece_pos(1, idx)
+            if pygame.Rect(cx - 24, cy - 24, 48, 48).collidepoint(pos):
+                return idx
+        for idx in legal:
+            cell = self.target_cell_of(1, idx)
+            if cell is not None and cell_rect(*cell).collidepoint(pos):
+                return idx
+            if self.state.p1_pieces[idx] + self.state.dice_roll == BOARD_END and P1_TRAY.collidepoint(pos):
+                return idx
+        return None
+
+    # Handle left mouse clicks on UI buttons, movable pieces, or highlighted destination tiles.
+    # pos: `(x, y)` click coordinate in window pixels.
     def on_click(self, pos):
         if self.over:
             if hasattr(self, "btn_again") and self.btn_again.collidepoint(pos):
@@ -724,79 +759,77 @@ class Game:
             return
         if hasattr(self, "btn_ai") and self.btn_ai.collidepoint(pos):
             self.ai_index = (self.ai_index + 1) % len(AGENTS)
-            self.log.append(f"Opponent AI switched to {AGENTS[self.ai_index][0]}")
+            self.log.append(f"Switched AI to {AGENTS[self.ai_index][0]}")
             return
         if hasattr(self, "btn_new") and self.btn_new.collidepoint(pos):
             self.reset()
             return
         if hasattr(self, "btn_hint") and self.btn_hint.collidepoint(pos):
             self.hint_on = not self.hint_on
-            self.hint = self._compute_hint()      # compute on toggle, refresh after each roll
+            self.hint = self._compute_hint()
             return
         if hasattr(self, "btn_roll") and self.btn_roll.collidepoint(pos):
             if self.state.current_turn == 1 and self.phase == "human_await_roll" and not self.dice_rolling:
                 self.human_roll()
             return
-        # clicking a legal piece, or directly clicking its highlighted target cell, moves it
-        if self.state.current_turn == 1 and self.phase == "human_await_move" and not self.dice_rolling:
-            for idx in self.state.get_legal_moves():
-                cx, cy = self.piece_pos(1, idx)
-                if pygame.Rect(cx - 24, cy - 24, 48, 48).collidepoint(pos):
-                    self.human_move(idx)
-                    return
-            target = self.target_cell_of(1, self.hover_idx) if self.hover_idx is not None else None
-            if target is not None:
-                r, c = target
-                if cell_rect(r, c).collidepoint(pos):
-                    self.human_move(self.hover_idx)
-                    return
+        picked = self._pick_human_piece_at(pos)
+        if picked is not None:
+            self.human_move(picked)
 
-    # Update the hovered piece for the target-preview overlay.
-    # pos: mouse (x, y); sets self.hover_idx (None when no legal piece is under it).
+    # Update `self.hover_idx` when the cursor hovers over either a movable piece or its target tile.
+    # pos: `(x, y)` mouse cursor coordinate.
     def on_hover(self, pos):
-        self.hover_idx = None
-        if self.state.current_turn == 1 and self.phase == "human_await_move":
-            for idx in self.state.get_legal_moves():
-                cx, cy = self.piece_pos(1, idx)
-                if pygame.Rect(cx - 24, cy - 24, 48, 48).collidepoint(pos):
-                    self.hover_idx = idx
-                    break
+        self.hover_idx = self._pick_human_piece_at(pos)
 
-    # Return the grid cell of the target tile for a hovered piece.
-    # player, idx: whose piece and which index; None when idx is None.
+    # Return the `(row, col)` destination cell on the 3x6 grid for piece `(player, idx)`,
+    # safely returning `None` whenever `idx` is invalid or `target > BOARD_END`!
+    # player: 1 or 2; idx: piece index 0..2; target: destination logical tile index.
     def target_cell_of(self, player, idx):
-        if idx is None:
+        if idx is None or not (0 <= idx < 3):
             return None
-        roll = self.state.dice_roll
-        target = (self.state.p1_pieces if player == 1 else self.state.p2_pieces)[idx] + roll
+        pieces = self.state.p1_pieces if player == 1 else self.state.p2_pieces
+        target = pieces[idx] + self.state.dice_roll
+        if target > BOARD_END or target <= 0:
+            return None
         if target in (1, 2, 8, 9):
             return lane_cell(player, target)
         return shared_cell(target)
 
-    # Draw the translucent target-tile preview for the hovered human piece.
-    # ox, oy: shake offset; the preview uses red for a capture and gold for a rune.
+    # Highlight legal destination tiles during human move selection, emphasizing the hovered move.
+    # ox, oy: screen-shake offsets; legal: currently movable P1 piece indices.
     def draw_target_preview(self, ox, oy):
-        if self.hover_idx is None:
+        if self.over or self.state.current_turn != 1 or self.phase != "human_await_move":
             return
-        target = self.state.p1_pieces[self.hover_idx] + self.state.dice_roll
-        cell = self.target_cell_of(1, self.hover_idx)
-        if cell is None:
+        legal = self.state.get_legal_moves()
+        if not legal:
             return
-        r, c = cell
-        rect = pygame.Rect(ox + GRID_X + c * TILE, oy + GRID_Y + r * TILE, TILE, TILE)
-        enemy = self.state.p2_pieces
-        capture = WAR_START <= target <= WAR_END and target != 4 and target in enemy
-        rune = target in SAFE_TILES
-        color = RED if capture else (GOLD if rune else GREEN)
-        overlay = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
-        overlay.fill((*color, 60))
-        self.screen.blit(overlay, rect)
-        pygame.draw.rect(self.screen, color, rect, 3, border_radius=6)
-        tag = "CAPTURE!" if capture else ("RUNE*" if rune else "GO")
-        f = get_font(15)
-        self.screen.blit(f.render(tag, True, color), (rect.centerx - f.size(tag)[0] // 2, rect.y + rect.height - 18))
+        shown = [self.hover_idx] if self.hover_idx in legal else legal
+        for idx in shown:
+            if idx not in legal:
+                continue
+            target = self.state.p1_pieces[idx] + self.state.dice_roll
+            cell = self.target_cell_of(1, idx)
+            if cell is None:
+                continue
+            r, c = cell
+            rect = pygame.Rect(ox + GRID_X + c * TILE, oy + GRID_Y + r * TILE, TILE, TILE)
+            enemy = self.state.p2_pieces
+            capture = (WAR_START <= target <= WAR_END and target != 4 and target in enemy)
+            rune = (target in SAFE_TILES)
+            color = RED if capture else (GOLD if rune else GREEN)
+            is_focus = (idx == self.hover_idx)
+            overlay = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
+            overlay.fill((*color, 72 if is_focus else 34))
+            self.screen.blit(overlay, rect)
+            pygame.draw.rect(self.screen, color, rect, 3 if is_focus else 2, border_radius=6)
+            if is_focus:
+                tag = "CAPTURE!" if capture else ("BONUS*" if rune else ("SCORE!" if target == BOARD_END else f"#{idx+1} GO"))
+                f = get_font(14)
+                tw, _ = f.size(tag)
+                self.screen.blit(f.render(tag, True, color), (rect.centerx - tw // 2, rect.bottom - 18))
 
-    # Run the main event loop until the window is closed.
+    # Run the interactive 60 FPS window event loop for human play.
+    # dt: frame delta milliseconds returned by `self.clock.tick(FPS)`.
     def run(self):
         running = True
         while running:
@@ -823,117 +856,90 @@ class Game:
             self.render()
         pygame.quit()
 
-    # Headless self-test: (1) fast-forward 30 AI steps with full rendering,
-    # (2) exercise every human interaction branch (hover preview, button clicks,
-    # piece click, target-cell click, Hint: ON), (3) force all four pixelfx
-    # effects and save gameplay_preview.png, (4) run a real-pacing (fast=False)
-    # state-machine regression so the AI-turn hand-back is verified on genuine
-    # dt_ms timers instead of the zero-delay fast path.
+    # Execute comprehensive automated QA covering:
+    # (1) real-time `fast=False` state-machine progression & scoring edge case (`KeyError: 12` guard),
+    # (2) human UI interactions (Advisor Hint, hover, target-cell click, AI switch),
+    # (3) mid-game snapshot saving `gameplay_preview.png` with all four pixelfx effects active.
     def self_test(self):
-        # ---- part 1: fast AI-vs-AI steps with full rendering ----
-        steps = 0
-        while steps < 30 and not self.over:
-            self.update(16)
-            self.render()
-            steps += 1
-        # ---- part 2: scripted human interaction QA on a fresh state ----
+        # Part 1: Real-time (fast=False) state-machine + exact scoring hover regression test!
+        self.fast = False
         self.reset()
-        self.fast = True          # keep zero-delay updates for the scripted steps
-        # force a known human position: P1 pieces at 0/1/2, P2 at 3, roll 2
+        # Explicitly reproduce the old KeyError: 12 scenario (piece on 8 rolls 2 -> scores to 10 while hovered)
+        self.state = GameState(p1_pieces=[8, 0, 0], p2_pieces=[0, 0, 0], current_turn=1, dice_roll=2)
+        self._enter_phase("human_await_move")
+        self.hover_idx = 0
+        self.render()
+        self.human_move(0)
+        self.state.current_turn = 1
+        self.state.dice_roll = 2
+        self._enter_phase("human_await_move")
+        self.hover_idx = 0   # Even if stale hover_idx=0 were forced, must NOT raise KeyError: 12!
+        self.render()
+
+        self.reset()
+        self.human_roll()
+        for _ in range(10):
+            self.update(45)
+            self.render()
+        assert self.pulse > 0.0, "real-time pulse must advance without float indexing errors"
+        if self.phase == "human_await_move":
+            self.human_move(self.state.get_legal_moves()[0])
+        if self.state.current_turn == 1:
+            self.state.current_turn = 2
+            self._enter_phase("ai_think")
+        ticks = 0
+        while self.phase == "ai_think" and not self.over and ticks < 120:
+            self.update(50)
+            self.render()
+            ticks += 1
+        assert self.over or self.phase == "human_await_roll", "AI turn must hand back to human"
+        print("[self-test] Part 1 passed: scoring hover guard + real-time human/AI cycle verified!")
+
+        # Part 2: Human UI click/hover/hint regression test
+        self.reset()
+        self.fast = False
         self.state = GameState(p1_pieces=[0, 1, 2], p2_pieces=[3, 0, 0], current_turn=1, dice_roll=2)
-        self.phase = "human_await_move"
-        legal = self.state.get_legal_moves()
-        assert len(legal) > 0, "scripted position must have legal moves"
-        # toggle Hint: ON while P1 is choosing - the hint must be computed live
+        self._enter_phase("human_await_move")
         self.render()
         self.on_click(self.btn_hint.center)
-        assert self.hint_on, "hint button must enable the hint"
-        assert self.hint is not None and self.hint["scores"], "hint must be computed when toggled on a live position"
+        assert self.hint_on and self.hint is not None, "Advisor Hint button must compute live scores"
+        legal = self.state.get_legal_moves()
+        tr, tc = self.target_cell_of(1, legal[0])
+        target_px = cell_center(tr, tc)
+        self.on_hover(target_px)
+        assert self.hover_idx is not None, "Hovering over destination tile must highlight move"
         self.render()
-        # hover: the target preview rect must be valid and the preview draws without error
-        cx, cy = self.piece_pos(1, legal[0])
-        self.on_hover((cx, cy))
-        assert self.hover_idx == legal[0], "hover must pick up the legal piece"
-        target = self.target_cell_of(1, self.hover_idx)
-        assert target is not None, "hovered piece must have a target cell"
-        self.render()
-        self.draw_target_preview(*self.vfx.get_shake_offset())
-        # click the target preview cell directly: the move must be applied
-        tr, tc = target
-        self.on_click((GRID_X + tc * TILE + TILE // 2, GRID_Y + tr * TILE + TILE // 2))
-        assert self.state.p1_pieces[legal[0]] in (2, 3, 4), f"target-cell click must move the piece, got {self.state.p1_pieces}"
-        # click the AI toggle on a fresh scripted position: the opponent must cycle
-        self.state = GameState(p1_pieces=[0, 1, 2], p2_pieces=[3, 0, 0], current_turn=1, dice_roll=2)
-        self.phase = "human_await_move"
-        self.hint = None
-        before = self.ai_index
-        self.render()
-        self.on_click(self.btn_ai.center)
-        assert self.ai_index != before, "AI button click must cycle the opponent"
-        # click a legal piece centre: the move must be applied
-        legal2 = self.state.get_legal_moves()
-        cx2, cy2 = self.piece_pos(1, legal2[0])
-        self.on_click((cx2, cy2))
-        assert self.state.p1_pieces[legal2[0]] in (2, 3, 4), f"piece click must move it, got {self.state.p1_pieces}"
-        self.render()
-        print("[self-test] interaction QA passed (Hint: ON, hover preview, target-cell click, AI button, piece click)")
-        # ---- part 3: fresh fast game mid-play, force all four effects, save the
-        # preview (stop well before the game can end, so the overlay never covers the shot)
-        self.reset()
+        self.on_click(target_px)
+        assert self.state.p1_pieces != [0, 1, 2], "Clicking destination tile must move piece"
+        print("[self-test] Part 2 passed: Advisor Hint, hover preview, and target-tile click verified!")
+
+        # Part 3: Fast-forward 16 turns and save gameplay_preview.png with all 4 VFX active
         self.fast = True
+        self.reset()
+        self.hint_on = True
         steps = 0
         while steps < 16 and not self.over:
             self.update(16)
             self.render()
             steps += 1
-        c3, c4, c10 = self.tile_point(1, 3), self.tile_point(1, 4), self.tile_point(1, 10)
+        self.fast = False
+        self.pulse = 2.4
+        c3, c4, c10 = cell_center(1, 0), cell_center(1, 1), cell_center(1, 5)
         self.vfx.spawn("dice_roll", *self.dice_center(), scale=0.55)
         self.vfx.spawn("hit_explosion", c3[0], c3[1], scale=0.65)
         self.vfx.spawn("rune_glow", c4[0], c4[1], scale=0.75)
         self.vfx.spawn("score_burst", c10[0], c10[1], scale=0.75)
         for _ in range(6):
-            self.update(16)
+            self.vfx.update(33)
         if self.rich_decision:
             self.last_decision = self.rich_decision
         self.render()
         out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gameplay_preview.png")
         pygame.image.save(self.screen, out)
-        print(f"[self-test] rendered {steps} fast steps; preview saved to {out}")
-        print(f"[self-test] game over={self.over}, winner={self.state.get_winner()}, turns={self.turns}")
-        assert out and os.path.isfile(out), "preview png was not written"
-        # ---- part 4: Phase 4.6 real-pacing (fast=False) state-machine regression ----
-        # The fast=True path bypasses the phase timers entirely, so it cannot catch a
-        # stuck AI turn. Feed genuine dt_ms = 50 frames through update() and drive the
-        # human side manually; the AI side must roll, move and hand the phase back to
-        # "human_await_roll" (or keep rolling after a bonus turn) without deadlocking.
-        self.fast = False
-        self.reset()
-        assert self.phase == "human_await_roll" and not self.dice_rolling
-        self.human_roll()
-        for _ in range(40):                                   # cover ROLL_ANIM_MS
-            self.update(50)
-            self.render()
-        assert not self.dice_rolling, "dice tumble must commit on real timers"
-        assert self.phase in ("human_await_move", "skip_wait"), f"expected a human move phase, got {self.phase}"
-        legal = self.state.get_legal_moves()
-        if legal:
-            self.human_move(legal[0])
-        for _ in range(400):
-            if self.over:
-                break
-            self.update(50)
-            self.render()
-            if self.state.current_turn == 1 and self.phase == "human_await_roll":
-                break                                         # AI handed the turn back
-        assert not self.over, "regression window must not reach a terminal state"
-        assert self.state.current_turn == 1 and self.phase == "human_await_roll", \
-            f"AI turn must hand back to the human (current_turn={self.state.current_turn}, phase={self.phase})"
-        assert self.pulse > 0, "pulse must advance on real dt_ms frames"
-        print("[self-test] fast=False state-machine regression passed (human roll -> move -> AI roll -> AI move -> human turn)")
-        print("[self-test] all main.py UI checks passed")
+        assert os.path.isfile(out), "gameplay_preview.png was not written"
+        print(f"[self-test] Part 3 passed: saved preview to {out}")
 
 
-# The selectable P2 opponents: (label, class). The two searchers run at depth 4.
 AGENTS = [
     ("Expectiminimax", ExpectiminimaxAgent),
     ("Minimax", DeterministicMinimaxAgent),
@@ -943,13 +949,13 @@ AGENTS = [
 
 if __name__ == "__main__":
     random.seed(2026)
-    self_test = "--self-test" in sys.argv
-    if self_test:
+    is_self_test = "--self-test" in sys.argv
+    if is_self_test:
         os.environ["SDL_VIDEODRIVER"] = "dummy"
     pygame.init()
-    game = Game(fast=self_test)
-    if self_test:
-        game.self_test()
+    app = Game(fast=is_self_test)
+    if is_self_test:
+        app.self_test()
         pygame.quit()
     else:
-        game.run()
+        app.run()
