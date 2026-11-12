@@ -338,18 +338,20 @@ DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}
 
 > 每次 Phase 完成后更新本节。
 
-**当前状态（截至 Phase 4.5 完成）**：
+**当前状态（截至 Phase 4.6 完成）**：
 
 - [x] Phase 1–4.5 全部完成并自检通过
 - [x] 4 个实机 bug 修复
 - [x] 像素美术重制达到独立游戏级
+- [x] Phase 4.6：正常窗口模式（fast=False）4 个严重 bug 修复 + 真实帧率状态机回归测试
 - [ ] **下一步**：（规划者在此写新任务）
 
 **已确认决策（不可回退）**：
 - `score_burst` 选用 `ui/confetti`（103 帧多彩彩纸）而非 `pickups/collect-burst`
 - `meta.image` 保留原预设名，`vfx_manager.py` 按实际文件名加载并忽略该字段
 - 棋盘拓扑：工字形（去掉 4 个无意义侧行格）
-- 备战/得分各 3 槽位独立展示
+- 备战/得分各 3 槽位独立展示；槽位几何唯一真源 = `pixel_art.slot_centers`（备战 44/10、得分 44/8）
+- 状态机所有 phase 切换必须走 `_enter_phase()`（统一重置 phase_ms / ai_roll_done / ai_moved）
 
 **开放问题**：
 - （无）
@@ -367,6 +369,9 @@ DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}
 | 5 | MSYS2 Python 3.14 无 pip，不能装包 | 必须用 `C:\Users\User\AppData\Local\Programs\Python\Python312\python.exe` | 环境 |
 | 6 | pixelfx `meta.image` 是原预设名（如 `mana-burst.png`），不是实际文件名 | `vfx_manager.py` 按 `dice_roll.png` 等实际名加载，忽略 `meta.image` | Phase 3 |
 | 7 | 3 枚棋子初始 `[0,0,0]` 重叠 | 备战托盘 3 槽位独立坐标展示 | Phase 4.5 bug#3 |
+| 8 | `self.pulse` 是 float，`(pulse // 10) % 3` 产生 float 列表索引 → 第一帧 `TypeError`（fast=True 时 pulse 恒 0 才侥幸不崩） | 用 `int(pulse * 2) % 3`；任何用浮点驱动列表索引的地方都必须 `int()` 显式取整 | Phase 4.6 bug#1 |
+| 9 | `fast=True` 的 self-test 绕过真实 `dt_ms` 与状态机，掩盖了正常模式 AI 回合卡死 | `--self-test` 必须包含一段 `fast=False` 真实帧率回归（喂 `update(50)` 走完人类+AI 完整回合链） | Phase 4.6 bug#2/#4 |
+| 10 | 烘焙贴图槽位尺寸与槽心公式各写一套 → 托盘上槽位越界被裁、棋子漂移 | 槽位几何单一真源 `pixel_art.slot_centers(rect, slot_size, gap)`，烘焙与锚点共用；尺寸常量改两侧同步注释 | Phase 4.6 bug#3 |
 
 ---
 
