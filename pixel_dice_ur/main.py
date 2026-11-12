@@ -570,8 +570,8 @@ class Game:
         pixel_art.draw_button(self.screen, self.btn_new, "New Game (R)", BTN_RED,
                               self.btn_new.collidepoint(hover))
 
-    # Draw the turn-status banner at the top of the left panel (Phase 4.6: moved
-    # up from the board bottom so it no longer covers the P2 reserve dock).
+    # Draw the turn-status banner under the board so the current owner and the
+    # expected action are never ambiguous.
     def draw_turn_banner(self):
         ox, oy = self.vfx.get_shake_offset()
         if self.over:
@@ -692,6 +692,7 @@ class Game:
         ly += 18
         for line in self.log[-6:]:
             self.screen.blit(get_font(15).render(line[:34], True, TEXT), (lx, ly))
+            ly += 20
 
     # Draw the semi-transparent game-over overlay with the winner and a play-again button.
     def draw_game_over(self):
