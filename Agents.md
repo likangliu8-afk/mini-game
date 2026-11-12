@@ -270,7 +270,7 @@ DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}
 
 ---
 
-### Phase 4.6 — 正常模式 4 个严重 Bug 精准修复（commit 见 git log）✅ 完成
+### Phase 4.6 — 正常模式 4 个严重 Bug 精准修复（commit `f09d815`）✅ 完成
 
 - **交付**：`main.py` + `pixel_art.py` 修复，`gameplay_preview.png` 重新生成
 - **4 个 Bug 与修复**：
