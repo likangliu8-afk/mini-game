@@ -378,6 +378,8 @@ DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}
   - MATCH SUMMARY 用 `self.log` 中 `"P? #N -> ... (CAPTURED!)"` 计数 captures；bonus 计数用 `self.bonus_count` 字典（`reset()` 清零）
 - **遗留 / 后续**：无
 
+> [修订 2026-11-13]（commit `8e02b5c`）：实机截图发现 MATCH SUMMARY 数值错位——原实现把 P1/P2 两个数字拼成**一整串**按整串宽度居中在 `box.centerx`，且 y 比标签高 6px，导致数字飘到 "FINAL SCORE" 标签正上方。已改为固定三列表格：标签列左对齐（`box.x+44`），P1 列（青）/ P2 列（绯红）数字各自居中在自己的表头下方（`centerx-70` / `centerx+80`），同行同基线。self-test 4 Part 全通过，`gameplay_preview.png` 重新生成并目检对齐正确。
+
 ---
 
 ## §5 Phase Log 追加模板
@@ -414,6 +416,7 @@ DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}
 - [x] Phase 4.6：正常窗口模式（fast=False）4 个严重 bug 修复 + 真实帧率状态机回归测试
 - [x] Phase 4.7：规划者重制版 main.py / pixel_art.py 覆盖落地（S 形箭头压地砖、两段圣坛→得分槽插值、LEGEND 速查条、SysFont 锐利字体）
 - [x] Phase 4.8：程序化音频（BGM + 7 SFX，headless 静默降级）+ 圣殿夜空 / 皇家边框 / 4 动画火盆 + 浮动战斗文字 + MATCH SUMMARY 结算 + 顶栏 3 按钮 / LEGEND / Battle Log 打磨；self-test 新增 Part 4 音频降级 + float 生命周期回归
+- [x] Phase 4.8 修订（`8e02b5c`）：MATCH SUMMARY 数值错位修复（三列固定对齐，见 §4 修订小注）
 - [ ] **下一步**：（规划者在此写新任务）
 
 **已确认决策（不可回退）**：
@@ -445,6 +448,7 @@ DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}
 | 11 | 无头模式（`SDL_VIDEODRIVER=dummy` / 无音频设备）下 `pygame.mixer` 初始化可能失败或 `Sound.play()` 抛错 → 音频相关调用会让 `--self-test` 崩溃 | 所有音频入口（`init_audio` / `start_bgm` / `play` / `toggle_mute`）必须 try/except 全捕获 + `_ENABLED` 标志门控；失败时静默 no-op，绝不向外抛异常 | Phase 4.8 |
 | 12 | 循环 BGM 用浮点频率直接采样 → 首尾相位错位产生 loop 接缝"咔哒"声 | loop 关键振荡器（drone pad / LFO）改整数周期数（`two_pi * int(hz*n/SR)/n`）；一次性 `buffer` 烘焙整条循环，`play(loops=-1)` | Phase 4.8 |
 | 13 | 顶栏 / LEGEND / Battle Log 长文本溢出容器或与相邻按钮重叠 | 顶栏按钮宽度从右往左推导并预留 ≥30px banner 安全距；LOG 行 >176px 时在空格处截断（绝不切半词）；LEGEND 首行压到 ≤52 字符 | Phase 4.8 |
+| 14 | MATCH SUMMARY 把两列数值拼成整串居中 → 数字宽度不对称时整体漂移，P1 数字落在标签正上方 | 表格类排版必须拆成独立列：每列 x 坐标固定，各列文本单独居中/对齐，绝不靠空格填充拼串 | Phase 4.8 修订 |
 
 ---
 
