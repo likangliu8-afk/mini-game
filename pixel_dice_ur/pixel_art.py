@@ -1,10 +1,12 @@
 # Name: LAW LI KANG RAIN
 # Student ID: 1904VECI
 #
-# Phase 4.6: pre-baked pixel-art bank for the retro Babylonian UI. Every texture
+# Phase 4.8: pre-baked pixel-art bank for the retro Babylonian UI. Every texture
 # is painted pixel by pixel at low resolution and scaled up with nearest-neighbour
 # so the game gets a crisp indie pixel look with zero external image dependencies
-# beyond the baked pixelfx VFX sheets.
+# beyond the baked pixelfx VFX sheets. New in 4.8: midnight night-sky gradient,
+# low-contrast Babylonian city-wall bas-relief skyline, and 4-frame animated
+# pixel braziers for the board's empty concave corners.
 
 import math
 import random
@@ -193,6 +195,14 @@ class PixelArtBank:
         self.glow = [None] + self._bake_glow((244, 204, 88))
         self.path_layer = self._bake_path_layer()
         self.stars = self._make_stars()
+        # Phase 4.8 temple atmosphere layers:
+        # - self.bg: full-window midnight gradient + low-contrast city-wall bas-relief (baked ONCE)
+        # - self.casing: ornate obsidian/dark-gold royal frame drawn under the 14-tile hourglass board
+        # - self.braziers: 4-frame warm flame sprites for the board's empty concave corners
+        # - self.brazier_glow: matching faint warm-glow sprites (one per frame)
+        self.bg = self._bake_cityscape()
+        self.casing = self._bake_casing()
+        self.braziers, self.brazier_glow = self._bake_braziers()
 
     # Bake one 40x40 3D bevelled war-token sprite with drop shadow, rim, and number label.
     # fill: token top RGB; dark: cylinder side RGB; ring: metallic border RGB; num: piece label 1..3.
@@ -313,6 +323,128 @@ class PixelArtBank:
             }
             for _ in range(32)
         ]
+
+    # Bake the full-window midnight blue-purple night-sky gradient with a low-contrast
+    # Babylonian city-wall geometric bas-relief (brick band across the bottom + slim
+    # brick pilasters on both edges + stepped ziggurat silhouettes). Painted at
+    # half resolution then 2x-scaled for crisp pixel edges; baked ONCE at startup.
+    # sw, sh: half-resolution canvas size; rng: seeded Random for deterministic bricks.
+    def _bake_cityscape(self):
+        w, h = self.geo["win"]
+        sw, sh = w // 2, h // 2
+        s = pygame.Surface((sw, sh))
+        for y in range(sh):
+            col = mix((32, 28, 58), (14, 12, 24), y / max(1, sh - 1))
+            pygame.draw.line(s, col, (0, y), (sw - 1, y))
+        rng = random.Random(7)
+        brick_a, brick_b = (40, 36, 64), (46, 42, 72)
+        # horizontal brick band along the bottom temple floor (low contrast)
+        wall_top = sh - 28
+        for row in range(7):
+            y = wall_top + row * 4
+            off = 4 if row % 2 else 0
+            for x in range(-4, sw, 8):
+                col = brick_a if ((x // 8) + row) % 2 == 0 else brick_b
+                pygame.draw.rect(s, col, (x + off, y, 7, 3))
+        # slim brick pilasters hugging the far-left / far-right window edges
+        for x0 in (0, sw - 12):
+            for row in range(9):
+                y = 30 + row * 28
+                for x in range(x0, x0 + 12, 6):
+                    pygame.draw.rect(s, brick_b if (row + x) % 2 else (38, 34, 62),
+                                     (x, y, 5, 22))
+        # stepped ziggurat silhouettes above the bottom wall, far corners only
+        for cx in (44, sw - 44):
+            for lvl in range(4):
+                bwid = 44 - lvl * 8
+                by = wall_top - 6 - lvl * 8
+                pygame.draw.rect(s, (44, 40, 70), (cx - bwid // 2, by, bwid, 7))
+                pygame.draw.rect(s, (52, 48, 82), (cx - bwid // 2, by, bwid, 1))
+            for i in range(3):
+                _px(s, cx - 6 + i * 6, wall_top - 18, (60, 55, 92))
+        return pygame.transform.scale(s, (w, h))
+
+    # Bake the ornate obsidian/dark-gold royal board casing, sized to sit exactly
+    # under the 14-tile hourglass grid with a 30px ornate margin on every side.
+    # bw, bh: final pixel size; the inner panel color matches the old flat board frame.
+    def _bake_casing(self):
+        bw, bh = 6 * TILE_SRC * TILE_SCALE + 60, 3 * TILE_SRC * TILE_SCALE + 60
+        s = pygame.Surface((bw, bh), pygame.SRCALPHA)
+        outer = pygame.Rect(0, 0, bw, bh)
+        pygame.draw.rect(s, (20, 18, 34), outer, border_radius=10)
+        pygame.draw.rect(s, (142, 116, 64), outer, 3, border_radius=10)
+        pygame.draw.rect(s, (58, 50, 80), outer.inflate(-8, -8), 1, border_radius=7)
+        # stepped gold corner ornaments with arm accents
+        for cx, cy in ((10, 10), (bw - 15, 10), (10, bh - 15), (bw - 15, bh - 15)):
+            pygame.draw.rect(s, (192, 160, 88), (cx, cy, 5, 5))
+            pygame.draw.rect(s, (118, 96, 52), (cx - 3, cy + 7, 11, 2))
+            pygame.draw.rect(s, (118, 96, 52), (cx + 7, cy - 3, 2, 11))
+        # gilded rosette studs at the four mid-edge anchors
+        for px, py in ((bw // 2, 7), (7, bh // 2), (bw - 8, bh // 2), (bw // 2, bh - 8)):
+            pygame.draw.circle(s, (96, 80, 52), (px, py), 4)
+            pygame.draw.circle(s, (218, 184, 102), (px, py), 2)
+        # inner obsidian panel that the 14 tiles sit on
+        inner = pygame.Rect(30, 30, bw - 60, bh - 60)
+        pygame.draw.rect(s, (26, 22, 38), inner, border_radius=6)
+        pygame.draw.rect(s, (78, 66, 44), inner, 1, border_radius=6)
+        return s
+
+    # Bake one 44x56 (22x28 low-res, 2x) pixel brazier: static dark-gold bowl plus
+    # a 3-zone warm flame whose silhouette shifts per frame index.
+    # f: frame index 0..3 selecting the flame sway variant and spark offsets.
+    def _bake_brazier_frame(self, f):
+        s = pygame.Surface((22, 28), pygame.SRCALPHA)
+        # dark-gold bowl base (rim, body, feet)
+        pygame.draw.rect(s, (192, 160, 88), (3, 19, 16, 1))
+        pygame.draw.rect(s, (154, 126, 68), (5, 20, 12, 1))
+        for y in range(21, 25):
+            wdt = 10 if y < 23 else 12
+            x0 = (22 - wdt) // 2
+            pygame.draw.rect(s, (74, 58, 34) if y % 2 else (88, 68, 40), (x0, y, wdt, 1))
+        pygame.draw.rect(s, (52, 40, 24), (8, 25, 6, 2))
+        # flame variants: (x_offset, height, tip_width, base_width)
+        flames = [
+            [(0, 15, 3, 5)],
+            [(-1, 13, 3, 5), (4, 8, 2, 3)],
+            [(0, 11, 4, 6)],
+            [(1, 13, 3, 5), (-4, 9, 2, 3)],
+        ][f]
+        base_y = 19
+        for ox, hgt, tw, bw in flames:
+            layers = (
+                ((216, 96, 40), 1.00),
+                ((255, 164, 58), 0.70),
+                ((255, 228, 140), 0.42),
+                ((255, 250, 220), 0.16),
+            )
+            for col, frac in layers:
+                lh = max(2, int(hgt * frac))
+                for y in range(lh):
+                    t = y / max(1, lh - 1)                    # 0 at tip -> 1 at base
+                    wdt = max(1, int(tw + (bw - tw) * t))
+                    yy = base_y - lh + y
+                    x0 = 11 + ox - wdt // 2
+                    for xx in range(x0, x0 + wdt):
+                        _px(s, xx, yy, col)
+        return pygame.transform.scale(s, (44, 56))
+
+    # Bake the faint warm radial glow sprite that pulses behind each brazier.
+    # f: frame index 0..3 selecting a slightly different peak alpha (flicker).
+    def _bake_brazier_glow(self, f):
+        peak = (22, 30, 26, 34)[f]
+        s = pygame.Surface((64, 64), pygame.SRCALPHA)
+        for r in range(30, 4, -4):
+            alpha = int(peak * (1.0 - r / 32.0))
+            pygame.draw.circle(s, (255, 170, 80, alpha), (32, 34), r)
+        return pygame.transform.scale(s, (128, 128))
+
+    # Bake all four brazier flame frames and their matching glow sprites.
+    # frames: list of 44x56 SRCALPHA brazier sprites; glows: list of 128x128 halos.
+    def _bake_braziers(self):
+        return (
+            [self._bake_brazier_frame(f) for f in range(4)],
+            [self._bake_brazier_glow(f) for f in range(4)],
+        )
 
 
 # Draw an embossed royal dark-gold UI panel with subtle gradient bands and corner rivets.

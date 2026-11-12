@@ -1,11 +1,13 @@
 # Name: LAW LI KANG RAIN
 # Student ID: 1904VECI
 #
-# Phase 4.6: Pygame main loop with Babylonian pixel-art visuals (pixel_art bank),
-# top authorship banner, non-overlapping 3-slot reserve docks and scored trays,
-# clear S-curve directional track bridges (Reserve -> 1 -> 2 -> 3..7 -> 8* -> 9 -> 10),
-# AI Decision Inspector panel with live Human Hint mode, 3D tumbling dice console,
-# battle log, pixelfx event bindings, and --self-test QA.
+# Phase 4.8: Pygame main loop with Babylonian pixel-art visuals (pixel_art bank),
+# procedural retro audio (sound_fx, zero external assets, headless-safe),
+# midnight temple background with animated braziers, floating combat text,
+# match-summary game-over panel, and polished top bar / legend / battle log.
+# All Phase 4.6/4.7 fixes are preserved: unified _enter_phase state machine,
+# integer glow tier, target_cell_of out-of-range guard, S-curve arrows painted
+# over tiles, and two-stage Shrine->Tray scoring slide.
 
 import math
 import os
@@ -19,6 +21,7 @@ try:
                            GreedyAgent, evaluate_state)
     from vfx_manager import VFXManager
     import pixel_art
+    import sound_fx
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from game_state import (BOARD_END, DICE_PROBS, SAFE_TILES, WAR_START,
@@ -27,13 +30,15 @@ except ImportError:
                            GreedyAgent, evaluate_state)
     from vfx_manager import VFXManager
     import pixel_art
+    import sound_fx
 
 import pygame
 
 # Update AUTHOR_NAME and STUDENT_ID here once before final submission
 AUTHOR_NAME = "LAW LI KANG RAIN"
 STUDENT_ID = "1904VECI"
-BANNER_TEXT = f"PIXEL DICE UR  |  Name: {AUTHOR_NAME}  |  Student ID: {STUDENT_ID}"
+# Phase 4.8: compact left banner; three right-side buttons follow it with a safe gap.
+BANNER_TEXT = f"PIXEL DICE UR | {AUTHOR_NAME} | ID: {STUDENT_ID}"
 
 WIN_W, WIN_H = 1024, 640
 BANNER_H = 48
@@ -120,7 +125,8 @@ def cell_rect(row, col):
 
 
 class Game:
-    # Initialize the Pygame display, pre-bake pixel-art surfaces, and start a fresh match.
+    # Initialize the Pygame display, pre-bake pixel-art surfaces, start the
+    # procedural audio bank, and start a fresh match.
     # fast: True only during headless fast-forward steps; False for normal 60 FPS gameplay.
     def __init__(self, fast=False):
         pygame.display.set_caption(f"Pixel Dice Ur - {AUTHOR_NAME} - {STUDENT_ID}")
@@ -142,7 +148,13 @@ class Game:
         # Also paint the sprint exit arrows `7 -> 8* -> 9 -> 10 (Shrine)` onto `path_layer`!
         self.art._dash(self.art.path_layer, p1_exit_way, (90, 218, 240, 215))
         self.art._dash(self.art.path_layer, p2_exit_way, (240, 96, 128, 215))
+        # Phase 4.8: lazy audio init (silent no-op under SDL_VIDEODRIVER=dummy),
+        # floating combat text list, and per-player bonus-turn counters.
+        sound_fx.init_audio()
+        self.floats = []
+        self.bonus_count = {1: 0, 2: 0}
         self.reset()
+        sound_fx.start_bgm()
 
     # Build the entry (`Reserve -> 1 -> 2 -> 3`) and exit (`7 -> 8* -> 9 -> 10`) waypoint
     # chains so every single step along the S-curve track has a visible directional arrow!
@@ -174,7 +186,9 @@ class Game:
         self.state = GameState()
         self.vfx = VFXManager()
         self.turns = 0
-        self.log = ["Match started! Press SPACE or click ROLL."]
+        self.log = ["Ready! Press SPACE to roll."]
+        self.floats = []
+        self.bonus_count = {1: 0, 2: 0}
         self.last_decision = None
         self.rich_decision = None
         self.hint = None
@@ -220,12 +234,14 @@ class Game:
             return self.tray_slot_center(player, piece if piece is not None else 0)
         return cell_center(*cell)
 
-    # Trigger the 260 ms 3D dice tumble animation before committing the random roll.
+    # Trigger the 260 ms 3D dice tumble animation before committing the random roll,
+    # playing the short `dice_tick` blip for the shuffle.
     # self.dice_rolling/self.dice_roll_ms: animation state flags.
     def start_roll(self):
         self.hover_idx = None
         self.dice_rolling = True
         self.dice_roll_ms = 0
+        sound_fx.dice_tick()
 
     # Finalize a dice roll after tumbling, spawn `dice_roll` VFX, and update the turn phase.
     # player: 1 or 2 indicating who rolled; roll: sampled die outcome 1..3.
@@ -233,6 +249,7 @@ class Game:
         roll = self.state.roll_dice()
         cx, cy = self.dice_center()
         self.vfx.spawn("dice_roll", cx, cy, scale=0.55)
+        sound_fx.dice_land()
         self.log.append(f"P{player} rolled {roll}")
         if player == 1:
             self.hint = self._compute_hint()
@@ -316,15 +333,28 @@ class Game:
             tray_x, tray_y = cx, cy
         if ev["captured"]:
             self.vfx.spawn("hit_explosion", cx, cy, scale=0.65)
+            sound_fx.capture_sfx()
+            self.floats.append({"text": "-1 FOE! CAPTURED!", "color": (234, 82, 74),
+                                "x": cx, "y": cy - 26, "t": 0.0})
         if ev["bonus_turn"]:
             self.vfx.spawn("rune_glow", cx, cy, scale=0.75)
+            sound_fx.bonus_sfx()
+            self.bonus_count[player] += 1
+            self.floats.append({"text": "+BONUS TURN!", "color": (244, 204, 88),
+                                "x": cx, "y": cy - 26, "t": 0.0})
         if ev["scored"]:
             self.vfx.spawn("score_burst", cx, cy, scale=0.75)
+            sound_fx.score_sfx()
             if idx is not None:
                 self.vfx.spawn("score_burst", tray_x, tray_y, scale=0.55)
+            self.floats.append({"text": "+1 SCORED!", "color": (96, 220, 132),
+                                "x": cx, "y": cy - 26, "t": 0.0})
+        if idx is not None:
+            sound_fx.move_sfx()
         if self.state.is_terminal():
             self.over = True
             self.hover_idx = None
+            sound_fx.win_sfx()
             self.vfx.spawn("score_burst", cx - 45, cy - 20, scale=0.75)
             self.vfx.spawn("score_burst", cx + 45, cy - 20, scale=0.75)
         if idx is not None:
@@ -371,13 +401,19 @@ class Game:
             else:
                 self._enter_phase("ai_think")
 
-    # Advance animations, VFX, dice tumbles, and turn timers by `dt_ms` milliseconds.
+    # Advance animations, VFX, dice tumbles, floating combat text, and turn timers
+    # by `dt_ms` milliseconds.
     # dt_ms: elapsed frame time in ms; dt: 0 in headless fast-forward mode, else dt_ms.
     def update(self, dt_ms):
         dt = 0 if self.fast else dt_ms
         if not self.fast:
             self.pulse += dt_ms * 0.005
         self.vfx.update(dt_ms if self.fast else dt)
+        # Phase 4.8: drift-up + fade every floating combat text popup over ~900 ms
+        for fl in list(self.floats):
+            fl["t"] += dt_ms
+            if fl["t"] >= 900:
+                self.floats.remove(fl)
         if self.slides:
             for key in list(self.slides):
                 s = self.slides[key]
@@ -397,6 +433,7 @@ class Game:
             if self.state.current_turn == 1:
                 roll = self.state.roll_dice()
                 self.vfx.spawn("dice_roll", *self.dice_center(), scale=0.55)
+                sound_fx.dice_land()
                 self.log.append(f"P1 rolled {roll}")
                 legal = self.state.get_legal_moves()
                 if not legal:
@@ -467,12 +504,15 @@ class Game:
     # Render one complete frame in strict back-to-front layer order before flipping display.
     # ox, oy: current screen-shake offset applied to board elements; VFX applies its own internally.
     def render(self):
-        self.screen.fill((18, 16, 28))
+        # Phase 4.8: baked midnight night-sky + city-wall bas-relief background
+        self.screen.blit(self.art.bg, (0, 0))
         self.draw_stars()
         ox, oy = self.vfx.get_shake_offset()
+        self.draw_braziers(ox, oy)
         self.draw_board(ox, oy)
         self.draw_target_preview(ox, oy)
         self.draw_pieces(ox, oy)
+        self.draw_floats()
         self.draw_legend()
         self.draw_banner()
         self.draw_turn_banner()
@@ -483,7 +523,7 @@ class Game:
             self.draw_game_over()
         pygame.display.flip()
 
-    # Render twinkling upward-drifting background stardust motes.
+    # Render twinkling upward-drifting background stardust motes over the night sky.
     # t: current animation time phase; y/alpha: wrapped vertical coordinate and star opacity.
     def draw_stars(self):
         t = self.pulse
@@ -494,13 +534,33 @@ class Game:
             surf = pixel_art.draw_star_surface(star, alpha)
             self.screen.blit(surf, (star["x"], y))
 
+    # Draw the four animated pixel braziers sitting in the board's empty concave
+    # corners (the four grid cells that the hourglass layout leaves empty: rows 0
+    # and 2, columns 2 and 3), cycling 4 flame frames + matching warm glow at ~6 fps.
+    # ox, oy: screen-shake offsets; f: current integer flame frame 0..3.
+    def draw_braziers(self, ox, oy):
+        # The four empty concave grid cells of the hourglass board (no tile lives here)
+        spots = [
+            cell_center(0, 2),
+            cell_center(0, 3),
+            cell_center(2, 2),
+            cell_center(2, 3),
+        ]
+        f = int(self.pulse * 3) % 4
+        flame = self.art.braziers[f]
+        glow = self.art.brazier_glow[f]
+        for sx, sy in spots:
+            x, y = sx + ox, sy + oy
+            self.screen.blit(glow, (x - 64, y - 70))
+            self.screen.blit(flame, (x - 22, y - 30))
+
     # Draw the hourglass 14-tile Babylonian board, crisp tile badges, S-curve directional
     # arrows ON TOP OF tile seams, non-overlapping docks/trays, and breathing rune halos.
     # ox, oy: integer screen-shake pixel offsets; tier: integer glow level in {1, 2, 3}.
     def draw_board(self, ox, oy):
-        board_frame = pygame.Rect(ox + GRID_X - 10, oy + GRID_Y - 10, 6 * TILE + 20, 3 * TILE + 20)
-        pygame.draw.rect(self.screen, (26, 22, 38), board_frame, border_radius=8)
-        pygame.draw.rect(self.screen, (96, 80, 52), board_frame, 2, border_radius=8)
+        # Phase 4.8: ornate obsidian/dark-gold royal casing baked under the 14-tile hourglass
+        casing = self.art.casing
+        self.screen.blit(casing, (ox + GRID_X - 30, oy + GRID_Y - 30))
         for row in range(3):
             for col in range(6):
                 if row in (0, 2) and col in (2, 3):
@@ -546,28 +606,57 @@ class Game:
                     col = GOLD if idx == self.hover_idx else HI
                     pygame.draw.circle(self.screen, col, (cx, cy - 2), rad, 2)
 
+    # Phase 4.8: draw floating pixel combat text popups that drift up ~26px and fade
+    # over ~900 ms (capture = crimson, rune = gold, finish = emerald, black outline).
+    # fl: popup dict with text/color/x/y/t keys; f01: normalized popup age 0..1.
+    def draw_floats(self):
+        ox, oy = self.vfx.get_shake_offset()
+        for fl in self.floats:
+            f01 = fl["t"] / 900.0
+            y = int(fl["y"] - 26 * f01) + oy
+            x = int(fl["x"]) + ox
+            s = get_font(15)
+            txt = s.render(fl["text"], True, (10, 10, 16))
+            main = s.render(fl["text"], True, fl["color"])
+            off = 2
+            for dx in (-off, 0, off):
+                for dy in (-off, 0, off):
+                    if dx or dy:
+                        self.screen.blit(txt, (x - main.get_width() // 2 + dx, y + dy))
+            self.screen.blit(main, (x - main.get_width() // 2, y))
+
     # Draw the bottom-left tactical rules & route legend strip (zero overlap with docks).
-    # l1, l2: concise quick-reference strings for players and markers.
+    # l1, l2: concise quick-reference strings, kept short enough to stay inside
+    # LEGEND_RECT with >= 14 px right margin.
     def draw_legend(self):
         pixel_art.draw_panel(self.screen, LEGEND_RECT)
         f = get_font(13)
-        l1 = "ROUTE: Reserve -> 1 -> 2 -> War Zone (3..7) -> Sprint (8* -> 9) -> Golden Shrine (10)!"
-        l2 = "RULES: Tiles 3,5,6,7 = Capture Foe   |   Tiles 4* & 8* = Bonus Turn (Tile 4* = Shield)"
+        l1 = "ROUTE: Start -> 1 -> 2 -> War (3..7) -> Sprint (8*->9) -> Shrine (10)"
+        l2 = "RULES: 3,5,6,7 = Capture Foe  |  4* & 8* = Bonus Turn (4* = Shield)"
         self.screen.blit(f.render(l1, True, TEXT), (LEGEND_RECT.x + 12, LEGEND_RECT.y + 14))
         self.screen.blit(f.render(l2, True, GOLD), (LEGEND_RECT.x + 12, LEGEND_RECT.y + 38))
 
-    # Draw the mandatory top banner showing game title, author name, student ID, and quick buttons.
+    # Draw the mandatory top banner: compact left banner text plus three right-side
+    # buttons ([Sound], [AI], [New Game]) with a safe 12px gap between each.
     # hover: current mouse coordinate tuple used for button highlight feedback.
     def draw_banner(self):
         hover = pygame.mouse.get_pos() if not self.fast else (-1, -1)
         pixel_art.draw_panel(self.screen, pygame.Rect(0, 0, WIN_W, BANNER_H))
         self.screen.blit(get_font(19).render(BANNER_TEXT, True, GOLD), (14, 14))
-        self.btn_ai = pygame.Rect(WIN_W - 356, 10, 182, 28)
+        gap = 12
+        self.btn_new = pygame.Rect(WIN_W - 12 - 140, 10, 140, 28)
+        self.btn_ai = pygame.Rect(self.btn_new.x - gap - 170, 10, 170, 28)
+        self.btn_sound = pygame.Rect(self.btn_ai.x - gap - 160, 10, 160, 28)
+        snd_label = "Sound: ON (M)" if not sound_fx.is_muted() else "Sound: OFF (M)"
+        pixel_art.draw_button(
+            self.screen, self.btn_sound, snd_label,
+            (42, 92, 56) if not sound_fx.is_muted() else (48, 62, 96),
+            self.btn_sound.collidepoint(hover)
+        )
         pixel_art.draw_button(
             self.screen, self.btn_ai, f"AI: {AGENTS[self.ai_index][0]}",
             BTN_BLUE, self.btn_ai.collidepoint(hover)
         )
-        self.btn_new = pygame.Rect(WIN_W - 164, 10, 150, 28)
         pixel_art.draw_button(
             self.screen, self.btn_new, "New Game (R)",
             BTN_RED, self.btn_new.collidepoint(hover)
@@ -706,25 +795,52 @@ class Game:
         ly += 18
         for line in self.log[-7:]:
             col = HI if ("CAPTURED" in line or "BONUS" in line or "SCORED" in line) else TEXT
-            self.screen.blit(get_font(13).render(line[:33], True, col), (lx, ly))
+            # Phase 4.8: never truncate mid-word - drop to the previous space if needed
+            txt = line
+            if get_font(13).size(txt)[0] > 176:
+                cut = txt[:33]
+                sp = cut.rfind(" ")
+                txt = cut if sp < 14 else cut[:sp] + ".."
+            self.screen.blit(get_font(13).render(txt, True, col), (lx, ly))
             ly += 18
 
-    # Draw the modal victory/defeat overlay when all 3 pieces of either player score.
-    # winner: 1 (human) or 2 (AI); box: centered modal panel Rect.
+    # Draw the modal MATCH SUMMARY overlay when all 3 pieces of either player score:
+    # winner, total turns, P1 vs P2 final score, captures, and bonus turns earned.
+    # winner: 1 (human) or 2 (AI); box: centered modal panel Rect; p1_cap/p2_cap:
+    # capture tallies derived from the battle log for the summary grid.
     def draw_game_over(self):
+        p1_cap = sum(1 for l in self.log if l.startswith("P1") and "CAPTURED" in l)
+        p2_cap = sum(1 for l in self.log if l.startswith("P2") and "CAPTURED" in l)
         dim = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-        dim.fill((0, 0, 0, 175))
+        dim.fill((0, 0, 0, 185))
         self.screen.blit(dim, (0, 0))
-        box = pygame.Rect(WIN_W // 2 - 220, WIN_H // 2 - 115, 440, 230)
+        box = pygame.Rect(WIN_W // 2 - 250, WIN_H // 2 - 160, 500, 320)
         pixel_art.draw_panel(self.screen, box)
+        pixel_art.draw_title(self.screen, box.x + 14, box.y + 10, box.width - 28, "MATCH SUMMARY", GOLD)
         winner = self.state.get_winner()
         who = "PLAYER 1 (HUMAN) WINS!" if winner == 1 else "PLAYER 2 (AI) WINS!"
         col = P1_FILL if winner == 1 else P2_FILL
-        title = get_font(28).render(who, True, col)
-        self.screen.blit(title, (box.centerx - title.get_width() // 2, box.y + 38))
-        sub = get_font(18).render(f"Completed in {self.turns} total turns", True, TEXT)
-        self.screen.blit(sub, (box.centerx - sub.get_width() // 2, box.y + 92))
-        self.btn_again = pygame.Rect(box.centerx - 100, box.y + 146, 200, 40)
+        title = get_font(26).render(who, True, col)
+        self.screen.blit(title, (box.centerx - title.get_width() // 2, box.y + 44))
+        f = get_font(16)
+        cx1, cx2 = box.x + 70, box.x + box.width - 70
+        y = box.y + 100
+        self.screen.blit(f.render("PLAYER 1 (HUMAN)", True, P1_FILL), (cx1 - 90, y - 4))
+        self.screen.blit(f.render("PLAYER 2 (AI)", True, P2_FILL), (cx2 - 60, y - 4))
+        y += 30
+        rows = [
+            ("FINAL SCORE", f"{3 if winner == 1 else 0}  -  {0 if winner == 1 else 3}"),
+            ("CAPTURES", f"{p1_cap}        {p2_cap}"),
+            ("BONUS TURNS", f"{self.bonus_count[1]}        {self.bonus_count[2]}"),
+        ]
+        for label, val in rows:
+            self.screen.blit(get_font(13).render(label, True, TEXT_DIM), (box.centerx - 78, y + 2))
+            s = f.render(val, True, HI)
+            self.screen.blit(s, (box.centerx - s.get_width() // 2, y - 4))
+            y += 30
+        turns_s = get_font(14).render(f"Completed in {self.turns} total turns", True, TEXT)
+        self.screen.blit(turns_s, (box.centerx - turns_s.get_width() // 2, y + 6))
+        self.btn_again = pygame.Rect(box.centerx - 100, box.bottom - 52, 200, 40)
         hover = pygame.mouse.get_pos() if not self.fast else (-1, -1)
         pixel_art.draw_button(
             self.screen, self.btn_again, "Play Again (R)", (42, 92, 56),
@@ -760,6 +876,10 @@ class Game:
         if hasattr(self, "btn_ai") and self.btn_ai.collidepoint(pos):
             self.ai_index = (self.ai_index + 1) % len(AGENTS)
             self.log.append(f"Switched AI to {AGENTS[self.ai_index][0]}")
+            return
+        if hasattr(self, "btn_sound") and self.btn_sound.collidepoint(pos):
+            m = sound_fx.toggle_mute()
+            self.log.append("Audio muted" if m else "Audio on")
             return
         if hasattr(self, "btn_new") and self.btn_new.collidepoint(pos):
             self.reset()
@@ -844,6 +964,9 @@ class Game:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_r:
                         self.reset()
+                    elif event.key == pygame.K_m:
+                        m = sound_fx.toggle_mute()
+                        self.log.append("Audio muted" if m else "Audio on")
                     elif event.key == pygame.K_SPACE:
                         if self.state.current_turn == 1 and self.phase == "human_await_roll" and not self.dice_rolling:
                             self.human_roll()
@@ -859,7 +982,9 @@ class Game:
     # Execute comprehensive automated QA covering:
     # (1) real-time `fast=False` state-machine progression & scoring edge case (`KeyError: 12` guard),
     # (2) human UI interactions (Advisor Hint, hover, target-cell click, AI switch),
-    # (3) mid-game snapshot saving `gameplay_preview.png` with all four pixelfx effects active.
+    # (3) mid-game snapshot saving `gameplay_preview.png` with all four pixelfx effects,
+    # floating combat text, animated braziers, and the MATCH SUMMARY overlay active,
+    # (4) Phase 4.8 procedural audio silent-degradation + floating text lifecycle checks.
     def self_test(self):
         # Part 1: Real-time (fast=False) state-machine + exact scoring hover regression test!
         self.fast = False
@@ -913,7 +1038,8 @@ class Game:
         assert self.state.p1_pieces != [0, 1, 2], "Clicking destination tile must move piece"
         print("[self-test] Part 2 passed: Advisor Hint, hover preview, and target-tile click verified!")
 
-        # Part 3: Fast-forward 16 turns and save gameplay_preview.png with all 4 VFX active
+        # Part 3: Fast-forward 16 turns and save gameplay_preview.png with all 4 VFX +
+        # floating combat text popups + animated braziers + match summary active
         self.fast = True
         self.reset()
         self.hint_on = True
@@ -933,11 +1059,46 @@ class Game:
             self.vfx.update(33)
         if self.rich_decision:
             self.last_decision = self.rich_decision
+        # Phase 4.8: showcase the three floating combat text styles in the snapshot
+        self.floats = [
+            {"text": "-1 FOE! CAPTURED!", "color": (234, 82, 74), "x": c3[0], "y": c3[1] - 26, "t": 300.0},
+            {"text": "+BONUS TURN!", "color": (244, 204, 88), "x": c4[0], "y": c4[1] - 26, "t": 150.0},
+            {"text": "+1 SCORED!", "color": (96, 220, 132), "x": c10[0], "y": c10[1] - 26, "t": 450.0},
+        ]
+        self.render()
+        # Phase 4.8: also snapshot the MATCH SUMMARY overlay in the same preview
+        self.state = GameState(p1_pieces=[10, 10, 10], p2_pieces=[0, 0, 0],
+                               current_turn=2, dice_roll=0)
+        self.over = True
+        self.floats = []
+        self.bonus_count = {1: 3, 2: 1}
+        self.log.append("P1 #3 -> tile 10 (SCORED!)")
+        self.log.append("P1 #2 -> tile 10 (CAPTURED!)")
         self.render()
         out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gameplay_preview.png")
         pygame.image.save(self.screen, out)
         assert os.path.isfile(out), "gameplay_preview.png was not written"
         print(f"[self-test] Part 3 passed: saved preview to {out}")
+
+        # Part 4: Phase 4.8 regression - procedural audio must silently no-op under
+        # SDL_VIDEODRIVER=dummy (or when no device exists) and every floating combat
+        # text popup must advance and expire without raising.
+        sound_fx.init_audio()
+        sound_fx.start_bgm()
+        for name in ("dice_tick", "dice_land", "move", "capture", "bonus", "score", "win"):
+            sound_fx.play(name)
+        m1 = sound_fx.toggle_mute()
+        assert m1 is True
+        m2 = sound_fx.toggle_mute()
+        assert m2 is False
+        sound_fx.start_bgm()
+        self.floats = [{"text": "+BONUS TURN!", "color": (244, 204, 88),
+                        "x": 300, "y": 300, "t": 0.0}]
+        for _ in range(70):
+            self.update(16)
+            self.render()
+        assert self.floats == [], "floating combat text must expire after ~900 ms"
+        print("[self-test] Part 4 passed: audio silent-degradation + floating text lifecycle verified!")
 
 
 AGENTS = [
