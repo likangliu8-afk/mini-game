@@ -1,17 +1,21 @@
 # Name: LAW LI KANG RAIN
 # Student ID: 1904VECI
 #
-# Phase 4.5: pygame main loop with an indie-grade retro pixel look (pixel_art bank),
+# Phase 4.6: pygame main loop with an indie-grade retro pixel look (pixel_art bank),
 # the AI Decision Inspector panel, dice console + battle log, the four pixelfx
 # effects bound to game events, dice tumble animation and a --self-test that also
 # exercises every human interaction branch (hover preview, button/piece/target
-# clicks, Hint: ON) before saving gameplay_preview.png.
+# clicks, Hint: ON) plus a real-pacing (fast=False) state-machine regression
+# before saving gameplay_preview.png.
+#
+# Phase 4.6 fixes: rune-glow tier float indexing (int cast), the fast=False AI
+# turn deadlock (unified _enter_phase + do_ai_move phase hand-back), and the
+# left-panel dock/tray/banner overlap re-layout.
 #
 # Usage:
 #     python pixel_dice_ur/main.py               # real window for a human player
 #     python pixel_dice_ur/main.py --self-test   # headless render + interaction QA + preview png
 
-import math
 import math
 import os
 import sys
@@ -47,18 +51,28 @@ BANNER_H = 48
 FPS = 60
 
 TILE = 84                       # one tile is 84x84 px
-GRID_X, GRID_Y = 73, 218        # top-left of the 3x6 grid
+GRID_X, GRID_Y = 73, 228        # top-left of the 3x6 grid (228 keeps 12px+ clear of every dock/tray)
 LEFT_W = 650                    # left board panel width; right panel is WIN_W - LEFT_W
 
-# reserve dock / scored tray slots (3 per side, one dedicated slot per piece)
-DOCK_H = 76
-P1_DOCK = pygame.Rect(GRID_X + 2 * TILE + 4, GRID_Y - DOCK_H - 12, 256, DOCK_H)
-P2_DOCK = pygame.Rect(GRID_X + 2 * TILE + 4, GRID_Y + 3 * TILE + 12, 256, DOCK_H)
-TRAY_H = 54
-P1_TRAY = pygame.Rect(GRID_X + 5 * TILE, GRID_Y - TRAY_H - 8, 120, TRAY_H)
-P2_TRAY = pygame.Rect(GRID_X + 5 * TILE, GRID_Y + 3 * TILE + 8, 120, TRAY_H)
-SLOT_W, SLOT_GAP = 48, 8
-SLOT_X0 = (256 - (3 * SLOT_W + 2 * SLOT_GAP)) // 2   # same math as the baked dock art
+# reserve dock / scored tray plates (3 slots per side, one dedicated slot per piece).
+# Phase 4.6 re-layout: top row sits 12px above the grid, bottom row 14px below it;
+# dock (200 wide) and tray (164 wide) keep 20px horizontal clearance between them.
+DOCK_W, DOCK_H = 200, 72
+TRAY_W, TRAY_H = 164, 72
+TOP_ROW_Y = GRID_Y - DOCK_H - 12         # 144: P1 reserve/scored row above the grid
+BOT_ROW_Y = GRID_Y + 3 * TILE + 14       # 494: P2 reserve/scored row below the grid (566 < 640)
+P1_DOCK = pygame.Rect(GRID_X + 140, TOP_ROW_Y, DOCK_W, DOCK_H)
+P2_DOCK = pygame.Rect(GRID_X + 140, BOT_ROW_Y, DOCK_W, DOCK_H)
+P1_TRAY = pygame.Rect(GRID_X + 360, TOP_ROW_Y, TRAY_W, TRAY_H)
+P2_TRAY = pygame.Rect(GRID_X + 360, BOT_ROW_Y, TRAY_W, TRAY_H)
+
+# slot geometry shared with pixel_art.slot_centers / _bake_dock - the SAME sizes
+# must stay in sync or pieces drift off the baked slot recesses
+DOCK_SLOT, DOCK_SLOT_GAP = 44, 10
+TRAY_SLOT, TRAY_SLOT_GAP = 44, 8
+
+# turn banner: top of the left panel, clear of every dock/tray rect
+TURN_BANNER_Y = BANNER_H + 14            # 62: 56px above the top dock row
 
 # middle-row tile kinds: cols 0..4 = war tiles 3..7 (col 1 is the rune tile 4),
 # col 5 = finish; top/bottom rows: cols 0,1 = lane tiles 1,2; col 2 = dock;
@@ -189,22 +203,36 @@ class Game:
         self.hover_idx = None          # human piece under the cursor (target preview)
         self.pulse = 0.0               # drives the legal-move pulsing frame
         self.human_agent = GreedyAgent() if self.fast else None
+        # unified entry keeps phase timers + AI turn flags consistent on every reset
+        self._enter_phase("human_await_roll")
+
+    # Unified phase switch: every state-machine transition goes through here so the
+    # phase timer and the two AI turn flags (ai_roll_done / ai_moved) are ALWAYS
+    # reset together - a stale flag is exactly what deadlocked the fast=False AI
+    # turn in Phase 4.5.
+    # name: one of "human_await_roll" / "human_await_move" / "skip_wait" / "ai_think".
+    def _enter_phase(self, name):
+        self.phase = name
+        self.phase_ms = 0
+        self.ai_roll_done = False
+        self.ai_moved = False
 
     # Return the centre point of one reserve-dock slot for a player.
     # player: 1 or 2; slot: 0, 1 or 2 (the piece index).
+    # Shares pixel_art.slot_centers with the baked recesses so the sprite and the
+    # plate art can never drift apart (Phase 4.6: the old hardcoded 48/8 math cut
+    # the scored-tray slots off the 120px plate).
     def dock_slot_center(self, player, slot):
-        dock = P1_DOCK if player == 1 else P2_DOCK
-        x = dock.x + SLOT_X0 + slot * (SLOT_W + SLOT_GAP) + SLOT_W // 2
-        return (x, dock.y + 20 + 24)
+        cx, cy = pixel_art.slot_centers(P1_DOCK if player == 1 else P2_DOCK,
+                                        DOCK_SLOT, DOCK_SLOT_GAP)[slot]
+        return cx, cy
 
     # Return the centre point of one scored-tray slot for a player.
     # player: 1 or 2; slot: 0, 1 or 2.
     def tray_slot_center(self, player, slot):
-        tray = P1_TRAY if player == 1 else P2_TRAY
-        tw = 36
-        tx0 = tray.x + (tray.width - (3 * tw + 2 * SLOT_GAP)) // 2
-        x = tx0 + slot * (tw + SLOT_GAP) + tw // 2
-        return (x, tray.y + 18 + tw // 2)
+        cx, cy = pixel_art.slot_centers(P1_TRAY if player == 1 else P2_TRAY,
+                                        TRAY_SLOT, TRAY_SLOT_GAP)[slot]
+        return cx, cy
 
     # Compute the centre screen point where a moved piece's pixelfx pivot should sit.
     # player: 1 or 2; tile: logical destination; piece: the piece index (dock slots are
@@ -234,14 +262,16 @@ class Game:
         if player == 1:
             self.hint = self._compute_hint()     # refresh hint right after the die lands
             if not self.state.get_legal_moves():
-                self.phase = "skip_wait"
+                self._enter_phase("skip_wait")
                 self.log.append("P1 no legal moves - Turn skipped")
             else:
-                self.phase = "human_await_move"
+                self._enter_phase("human_await_move")
         else:
             self.ai_roll_done = True
             if not self.state.get_legal_moves():
-                self.do_ai_move(None)            # no legal move: the AI still "plays" the skip
+                # no legal move: the AI still "plays" the skip; do_ai_move will
+                # hand the phase back to the human (current_turn becomes 1).
+                self.do_ai_move(None)
 
     # Compute the live human hint (Expectiminimax d=4) when the hint toggle is on.
     # Returns a dict with scores / best / targets, or None when off.
@@ -275,6 +305,14 @@ class Game:
             self.rich_decision = dict(self.last_decision)
         self.apply_and_animate(2, best if best is not None else move_idx, roll)
         self.ai_moved = True
+        # Phase 4.6: hand the state machine back correctly after the AI's move.
+        # A rune landing (4/8) keeps current_turn == 2 -> the AI rolls again from a
+        # clean "ai_think"; otherwise control returns to the human player.
+        if not self.over:
+            if self.state.current_turn == 2:
+                self._enter_phase("ai_think")
+            else:
+                self._enter_phase("human_await_roll")
 
     # Apply a move for player to the current state, then animate the slide and trigger
     # the four pixelfx effects according to the returned event_info dict.
@@ -345,10 +383,9 @@ class Game:
         self.hint = None
         if not self.over:
             if self.state.current_turn == 1:
-                self.phase = "human_await_roll"    # bonus turn: roll again
+                self._enter_phase("human_await_roll")    # bonus turn: roll again
             else:
-                self.phase = "ai_think"
-                self.phase_ms = 0
+                self._enter_phase("ai_think")
 
     # Advance the game one update tick.
     # dt_ms: real milliseconds since the previous update; drives timers, slides,
@@ -417,8 +454,7 @@ class Game:
                 self.apply_and_animate(1, None, self.state.dice_roll)
                 self.hint = None
                 if not self.over and self.state.current_turn == 2:
-                    self.phase = "ai_think"
-                    self.phase_ms = 0
+                    self._enter_phase("ai_think")
 
     # Return the screen position to render a piece at, honouring any active slide.
     # player, idx: which piece; dock pieces sit in their own slot, scored pieces in
@@ -497,7 +533,9 @@ class Game:
         self.screen.blit(self.art.trays[1], (ox + P1_TRAY.x, oy + P1_TRAY.y))
         self.screen.blit(self.art.trays[2], (ox + P2_TRAY.x, oy + P2_TRAY.y))
         # breathing glow on the two rune tiles (4 middle, 8 top/bottom lane ends)
-        tier = 1 + (self.pulse // 10) % 3 if self.pulse else 1
+        # Phase 4.6: self.pulse is a float - the old `pulse // 10 % 3` produced a
+        # float index (TypeError on list access) once the pulse left 0.0.
+        tier = 1 + int(self.pulse * 2) % 3
         glow = self.art.glow[tier]
         for r, c in ((1, 1), (0, 4), (2, 4)):
             cx, cy = cell_center(r, c)
@@ -532,8 +570,8 @@ class Game:
         pixel_art.draw_button(self.screen, self.btn_new, "New Game (R)", BTN_RED,
                               self.btn_new.collidepoint(hover))
 
-    # Draw the turn-status banner under the board so the current owner and the
-    # expected action are never ambiguous.
+    # Draw the turn-status banner at the top of the left panel (Phase 4.6: moved
+    # up from the board bottom so it no longer covers the P2 reserve dock).
     def draw_turn_banner(self):
         ox, oy = self.vfx.get_shake_offset()
         if self.over:
@@ -551,8 +589,8 @@ class Game:
             text, col = "AI THINKING...", P2_FILL
         f = get_font(20)
         surf = f.render(text, True, col)
-        x = GRID_X + (5 * TILE - surf.get_width()) // 2 + ox
-        y = GRID_Y + 3 * TILE + 44 + oy
+        x = 10 + (LEFT_W - surf.get_width()) // 2 + ox
+        y = TURN_BANNER_Y + oy
         pygame.draw.rect(self.screen, (30, 28, 44), pygame.Rect(x - 10, y - 3, surf.get_width() + 20, surf.get_height() + 7), 2)
         self.screen.blit(surf, (x, y))
 
@@ -654,7 +692,6 @@ class Game:
         ly += 18
         for line in self.log[-6:]:
             self.screen.blit(get_font(15).render(line[:34], True, TEXT), (lx, ly))
-            ly += 20
 
     # Draw the semi-transparent game-over overlay with the winner and a play-again button.
     def draw_game_over(self):
@@ -788,7 +825,9 @@ class Game:
     # Headless self-test: (1) fast-forward 30 AI steps with full rendering,
     # (2) exercise every human interaction branch (hover preview, button clicks,
     # piece click, target-cell click, Hint: ON), (3) force all four pixelfx
-    # effects, advance a few frames and save gameplay_preview.png.
+    # effects and save gameplay_preview.png, (4) run a real-pacing (fast=False)
+    # state-machine regression so the AI-turn hand-back is verified on genuine
+    # dt_ms timers instead of the zero-delay fast path.
     def self_test(self):
         # ---- part 1: fast AI-vs-AI steps with full rendering ----
         steps = 0
@@ -861,6 +900,35 @@ class Game:
         print(f"[self-test] rendered {steps} fast steps; preview saved to {out}")
         print(f"[self-test] game over={self.over}, winner={self.state.get_winner()}, turns={self.turns}")
         assert out and os.path.isfile(out), "preview png was not written"
+        # ---- part 4: Phase 4.6 real-pacing (fast=False) state-machine regression ----
+        # The fast=True path bypasses the phase timers entirely, so it cannot catch a
+        # stuck AI turn. Feed genuine dt_ms = 50 frames through update() and drive the
+        # human side manually; the AI side must roll, move and hand the phase back to
+        # "human_await_roll" (or keep rolling after a bonus turn) without deadlocking.
+        self.fast = False
+        self.reset()
+        assert self.phase == "human_await_roll" and not self.dice_rolling
+        self.human_roll()
+        for _ in range(40):                                   # cover ROLL_ANIM_MS
+            self.update(50)
+            self.render()
+        assert not self.dice_rolling, "dice tumble must commit on real timers"
+        assert self.phase in ("human_await_move", "skip_wait"), f"expected a human move phase, got {self.phase}"
+        legal = self.state.get_legal_moves()
+        if legal:
+            self.human_move(legal[0])
+        for _ in range(400):
+            if self.over:
+                break
+            self.update(50)
+            self.render()
+            if self.state.current_turn == 1 and self.phase == "human_await_roll":
+                break                                         # AI handed the turn back
+        assert not self.over, "regression window must not reach a terminal state"
+        assert self.state.current_turn == 1 and self.phase == "human_await_roll", \
+            f"AI turn must hand back to the human (current_turn={self.state.current_turn}, phase={self.phase})"
+        assert self.pulse > 0, "pulse must advance on real dt_ms frames"
+        print("[self-test] fast=False state-machine regression passed (human roll -> move -> AI roll -> AI move -> human turn)")
         print("[self-test] all main.py UI checks passed")
 
 
