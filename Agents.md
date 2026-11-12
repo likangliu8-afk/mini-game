@@ -75,6 +75,7 @@ DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}
 | `assets/vfx/*.png|json` | 3 | 4 组离线烘焙的 pixelfx 静态资产（dice_roll / hit_explosion / rune_glow / score_burst） |
 | `pixel_art.py` | 4.5 | 纯 Python 像素美术库：地砖 / 棋子 / 3D 骰子 / 路线导引 / 星尘 / 面板烘焙（零外部素材） |
 | `main.py` | 4 / 4.5 | Pygame 主循环 + 棋盘 UI + Inspector 面板 + 特效绑定 + 交互 + `--self-test` |
+| `sound_fx.py` | 4.8 | 纯 Python 程序化音频库：`array` 16-bit PCM 合成 BGM（Phrygian-Dominant 无缝循环 ~0.18）+ 7 种 SFX；headless 静默降级 no-op |
 | `gameplay_preview.png` | 4.5 | `--self-test` 生成的 16 步中期对局截图（验收排版用） |
 | `ai_comparison.png` | 2 | matplotlib 双子图（胜率对比 + 耗时/节点数） |
 
@@ -312,6 +313,73 @@ DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}
 
 ---
 
+### Phase 4.7 — 全面重制版 main.py + pixel_art.py（commit `58275e1`）✅ 完成
+
+- **交付**：规划者重制的 `main.py` + `pixel_art.py` 落地（覆盖 4.6 版本），重新生成 `gameplay_preview.png`
+- **关键变化**（相对 4.6）：
+  - **布局**：`GRID_Y` 228→188；备战/得分托盘改为 236×74 对称分布（左=RESERVE、右=SCORED，各离网格 14px）；新增底部 `LEGEND_RECT`（6 列宽 × 68px）规则/路线速查条
+  - **路线导引**：S 形赛道方向箭头改为 RGBA chevron 风格（`_dash` 带描边），绘制在**地砖之上**保证跨格接缝 100% 可见；geo 新增 `shared_way`（战区横向导引，金色）
+  - **得分动画**：到达 10 号格时棋子走两段插值 `from → 金圣坛(1,5) → 得分槽`（`SLIDE_MS × 1.6`），得分瞬间圣坛 + 槽位各爆一发 `score_burst`
+  - **槽位几何**：唯一真源更新为 `pixel_art.slot_center_in_rect(rect, slot_idx, slot_size=44, gap=12)`（托盘 44/12），烘焙凹槽与棋子锚点共用；`_bake_dock` 槽内新增 `#1/#2/#3` 编号暗字
+  - **交互**：`_pick_human_piece_at` 统一「点棋子 / 点目标格 / 点得分托盘」三条走子路径；`target_cell_of` 越界返回 None（防 `KeyError: 12`）；hover 高亮可走的目标格
+  - **UI 文本**：`get_font` / `_font` 改用 `SysFont("consolas,verdana,arial")` 锐利字体；Inspector / 横幅 / 日志文案全面英文化重写（Advisor Hint、Board Eval、Battle Events）
+  - **状态机**：保留 4.6 的 `_enter_phase` 统一入口 + `do_ai_move` 末尾交还控制权，未改动；fast 路径 P1 无走法时补了 `ai_think` 切换
+- **验证**（Python 3.12 全路径实测输出）：
+  ```
+  [self-test] Part 1 passed: scoring hover guard + real-time human/AI cycle verified!
+  [self-test] Part 2 passed: Advisor Hint, hover preview, and target-tile click verified!
+  [self-test] Part 3 passed: saved preview to ...\pixel_dice_ur\gameplay_preview.png
+  ```
+  - `game_state.py` / `vfx_manager.py` 基线自检同步回归通过
+  - 新 `gameplay_preview.png` 已目检：四托盘对称零重叠、S 形箭头清晰（青 P1 / 绯 P2 / 金战区）、规则条无越界
+- **决策记录**：
+  - 附件 `main.py` 第 130 行有一处变量名笔误（`p1_ entry_way` 中间空格 → SyntaxError），落地前已修正为 `p1_entry_way`
+  - `slot_center_in_rect` 槽位 44px / gap 12px（236px 托盘：3×44+2×12=156 居中），取代 4.6 的 44/10 与 44/8 双规格
+- **遗留 / 后续**：无
+
+---
+
+### Phase 4.8 — 终极打磨：程序化音频 + 圣殿夜空 + UI 质感（commit `1dc14c7`）✅ 完成
+
+- **交付**：新增 `sound_fx.py`（纯 Python 程序化音频，零外部 .wav/.mp3）；`main.py` + `pixel_art.py` 升级（午夜圣殿背景、皇家棋盘边框、4 个动画火盆、浮动战斗文字、Match Summary 结算面板、顶栏/LEGEND/Battle Log 打磨）；`gameplay_preview.png` 重新生成
+- **关键设计 / 接口**：
+  - `sound_fx.py` 新 API：`init_audio()->bool` / `start_bgm()` / `play(name)` / `toggle_mute()->bool` / `is_muted()` / `is_enabled()`；7 个 SFX（dice_tick/dice_land/move/capture/bonus/score/win）+ 1 条 BGM
+  - BGM：`_build_bgm(n)` 一次烘焙 ~9.7s（44 beat）无缝循环；D2 drone pad + Phrygian-Dominant（D Eb F# G A Bb C）motif + root-note bass pluck；pad/LFO 用整数周期数保证 loop 点无缝；通道音量 0.18
+  - SFX 波形：`_tone`（tri/sine 扫频 + 指数衰减）/ `_noise`（一阶低通白噪 + 指数衰减）/ `_chain`（拼接琶音链）；全部 `array('h')` 16-bit signed PCM → `pygame.mixer.Sound(buffer=)`
+  - 音频守卫：`init_audio()` 强制 mixer = (44100, -16, 1)；任何异常捕获后 `_ENABLED=False`，`play/start_bgm/toggle_mute` 全部静默 no-op
+  - `pixel_art.py` 新增：`_bake_cityscape`（午夜蓝紫渐变 + 低对比度巴比伦砖墙 + ziggurat 剪影，半分辨率烘焙 2× 放大）、`_bake_casing`（588×348 皇家黑曜石/暗金边框，30px 边距 + 四角金饰 + 边中罗盘钉）、`_bake_brazier_frame(f)` ×4 帧 + `_bake_brazier_glow(f)` ×4 帧（128×128 暖橙光晕）
+  - `main.py` 新增：`draw_braziers`（棋盘 4 个空格 concave corner 动画火盆，`int(pulse*3)%4` 切帧）、`draw_floats`（浮动战斗文字 ~900ms 上浮 + 黑描边）、`update()` 内 float 生命周期管理、`apply_and_animate` 绑定 4 种 SFX + 生成 3 种 float、`start_roll` 绑定 dice_tick、`commit_roll` 绑定 dice_land、`draw_game_over` 升级为 MATCH SUMMARY（FINAL SCORE 3-0、CAPTURES、BONUS TURNS、total turns）、`on_click` 绑定 `btn_sound`、`run()` 绑定 M 键
+- **参数 / 数值**：
+  | 常量 | 值 | 用途 |
+  |---|---|---|
+  | `SR` | 44100 | 音频采样率（mono 16-bit） |
+  | `BGM_SECONDS` | 9.7 | 循环长度（44 beat × ~0.22s） |
+  | `BGM_VOLUME` | 0.18 | 背景音乐通道音量 |
+  | 火盆帧切 | `int(pulse*3)%4` | ~6 fps 火焰闪烁 |
+  | float 生命周期 | 900 ms / 26 px 上浮 | 战斗文字上浮 + 淡出 |
+  | 顶栏按钮 | `[Sound: ON (M)]` 160px / `[AI]` 170px / `[New Game]` 140px / 12px 间距 | 从右往左布局，左 banner 保留 ≥30px 安全距 |
+  | LEGEND 首行 | `ROUTE: Start -> 1 -> 2 -> War (3..7) -> Sprint (8*->9) -> Shrine (10)` | ≤52 字符，13px 字体下不越界（右余量 ≥14px） |
+  | Battle Log | 开场 `Ready! Press SPACE to roll.`；单行 >176px 时在空格处截断 | 永不切半词 |
+- **验证**（Python 3.12 全路径实测输出）：
+  ```
+  [self-test] Part 1 passed: scoring hover guard + real-time human/AI cycle verified!
+  [self-test] Part 2 passed: Advisor Hint, hover preview, and target-tile click verified!
+  [self-test] Part 3 passed: saved preview to ...\pixel_dice_ur\gameplay_preview.png
+  [self-test] Part 4 passed: audio silent-degradation + floating text lifecycle verified!
+  ```
+  - `game_state.py` / `vfx_manager.py` 基线自检同步回归通过
+  - `sound_fx.py` 独立自检：真实设备 `enabled=True`，`SDL_AUDIODRIVER=weird_nonexistent_driver_xyz` 强制失败 `enabled=False` 且全程零异常
+  - 新 `gameplay_preview.png` 已目检：午夜蓝紫夜空 + 城墙浮雕、皇家黑金边框、4 火盆、浮动文字三色（crimson/gold/emerald）、MATCH SUMMARY 面板（3-0 / CAPTURES 2/1 / BONUS 3/1 / 16 turns）、顶栏 3 按钮零重叠、LEGEND 无越界、Battle Log 开场 `Ready! Press SPACE to roll.`
+- **决策记录**：
+  - 火盆位置选「棋盘工字形 4 个空 concave 格」（row 0/2 × col 2/3），非 dock 外侧 —— 严格贴合 spec 且零 UI 遮挡
+  - BGM pad / LFO 使用整数周期数（`two_pi * int(hz * n/SR) / n`）保证 loop 接缝相位 100% 对齐
+  - 所有 SFX 用 `pygame.mixer.Sound(buffer=pcm.tobytes())` 一次性构造，零运行时合成开销
+  - 顶栏按钮宽度由右往左推导（`btn_new` x=`WIN_W-12-140`；`btn_ai` x=`btn_new.x-gap-170`；`btn_sound` x=`btn_ai.x-gap-160`），banner 左对齐 14px 起，零覆盖
+  - MATCH SUMMARY 用 `self.log` 中 `"P? #N -> ... (CAPTURED!)"` 计数 captures；bonus 计数用 `self.bonus_count` 字典（`reset()` 清零）
+- **遗留 / 后续**：无
+
+---
+
 ## §5 Phase Log 追加模板
 
 每完成一个新 Phase，在 §4 末尾追加：
@@ -338,12 +406,14 @@ DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}
 
 > 每次 Phase 完成后更新本节。
 
-**当前状态（截至 Phase 4.6 完成）**：
+**当前状态（截至 Phase 4.8 完成）**：
 
 - [x] Phase 1–4.5 全部完成并自检通过
 - [x] 4 个实机 bug 修复
 - [x] 像素美术重制达到独立游戏级
 - [x] Phase 4.6：正常窗口模式（fast=False）4 个严重 bug 修复 + 真实帧率状态机回归测试
+- [x] Phase 4.7：规划者重制版 main.py / pixel_art.py 覆盖落地（S 形箭头压地砖、两段圣坛→得分槽插值、LEGEND 速查条、SysFont 锐利字体）
+- [x] Phase 4.8：程序化音频（BGM + 7 SFX，headless 静默降级）+ 圣殿夜空 / 皇家边框 / 4 动画火盆 + 浮动战斗文字 + MATCH SUMMARY 结算 + 顶栏 3 按钮 / LEGEND / Battle Log 打磨；self-test 新增 Part 4 音频降级 + float 生命周期回归
 - [ ] **下一步**：（规划者在此写新任务）
 
 **已确认决策（不可回退）**：
@@ -372,6 +442,9 @@ DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}
 | 8 | `self.pulse` 是 float，`(pulse // 10) % 3` 产生 float 列表索引 → 第一帧 `TypeError`（fast=True 时 pulse 恒 0 才侥幸不崩） | 用 `int(pulse * 2) % 3`；任何用浮点驱动列表索引的地方都必须 `int()` 显式取整 | Phase 4.6 bug#1 |
 | 9 | `fast=True` 的 self-test 绕过真实 `dt_ms` 与状态机，掩盖了正常模式 AI 回合卡死 | `--self-test` 必须包含一段 `fast=False` 真实帧率回归（喂 `update(50)` 走完人类+AI 完整回合链） | Phase 4.6 bug#2/#4 |
 | 10 | 烘焙贴图槽位尺寸与槽心公式各写一套 → 托盘上槽位越界被裁、棋子漂移 | 槽位几何单一真源 `pixel_art.slot_centers(rect, slot_size, gap)`，烘焙与锚点共用；尺寸常量改两侧同步注释 | Phase 4.6 bug#3 |
+| 11 | 无头模式（`SDL_VIDEODRIVER=dummy` / 无音频设备）下 `pygame.mixer` 初始化可能失败或 `Sound.play()` 抛错 → 音频相关调用会让 `--self-test` 崩溃 | 所有音频入口（`init_audio` / `start_bgm` / `play` / `toggle_mute`）必须 try/except 全捕获 + `_ENABLED` 标志门控；失败时静默 no-op，绝不向外抛异常 | Phase 4.8 |
+| 12 | 循环 BGM 用浮点频率直接采样 → 首尾相位错位产生 loop 接缝"咔哒"声 | loop 关键振荡器（drone pad / LFO）改整数周期数（`two_pi * int(hz*n/SR)/n`）；一次性 `buffer` 烘焙整条循环，`play(loops=-1)` | Phase 4.8 |
+| 13 | 顶栏 / LEGEND / Battle Log 长文本溢出容器或与相邻按钮重叠 | 顶栏按钮宽度从右往左推导并预留 ≥30px banner 安全距；LOG 行 >176px 时在空格处截断（绝不切半词）；LEGEND 首行压到 ≤52 字符 | Phase 4.8 |
 
 ---
 
@@ -388,3 +461,6 @@ DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}
 | Transposition Table | 共享搜索值缓存（P1 视角，key = state hash） |
 | 像素插值（Pixel Lerp） | 棋子 180ms 从 A 格滑到 B 格的帧间位置计算 |
 | pivot 锚定 | 特效帧中心对齐到触发点（`x - pivot_x, y - pivot_y`） |
+| Phrygian-Dominant（弗里吉亚多利亚） | D Eb F# G A Bb C 音阶，BGM 动机使用 |
+| 火盆（Brazier） | 棋盘工字形 4 个空 concave 格（row 0/2 × col 2/3）中的 4 帧动画暖橙火焰像素 |
+| 浮动战斗文字（Floating Combat Text） | 事件格上方 ~900ms 上浮 + 淡出的描边像素文字（吃子红 / 符文金 / 得分绿） |
