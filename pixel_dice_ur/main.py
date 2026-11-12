@@ -124,6 +124,8 @@ def cell_rect(row, col):
     return pygame.Rect(GRID_X + col * TILE, GRID_Y + row * TILE, TILE, TILE)
 
 
+# Top-level game controller: owns the Pygame loop, the live GameState, all UI
+# panels, VFX/audio bindings and the human-vs-AI turn state machine.
 class Game:
     # Initialize the Pygame display, pre-bake pixel-art surfaces, start the
     # procedural audio bank, and start a fresh match.

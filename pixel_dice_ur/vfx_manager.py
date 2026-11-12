@@ -50,6 +50,10 @@ FALLBACK_PALETTES = {
 # loop: whether the source effect is designed to cycle; is_fallback: True when the
 # frames were generated procedurally because the PNG assets are missing.
 class Effect:
+    # Build an Effect from already-cropped frames and their playback metadata.
+    # name: identifier key (e.g. "dice_roll"); frames: list of cropped Surfaces;
+    # durations_ms: per-frame playback time in ms; pivot: [px, py] anchor;
+    # loop: whether the source cycles; is_fallback: True when frames are procedural.
     def __init__(self, name, frames, durations_ms, pivot, loop, is_fallback=False):
         self.name = name
         self.frames = frames
@@ -175,6 +179,9 @@ def _load_effect_from_disk(name, assets_dir):
 # frame list instead of stopping; max_ms: optional hard stop in ms (None = play the
 # whole sequence once and stay on the last frame until it finishes).
 class ActiveEffect:
+    # Build a live playing instance at a fixed board position with its own clock.
+    # effect: the Effect to play; x, y: board-space pivot point; scale: size factor;
+    # loop: wrap the frame list; max_ms: optional hard stop in ms (None = no cap).
     def __init__(self, effect, x, y, scale, loop, max_ms):
         self.effect = effect
         self.x, self.y = int(x), int(y)
@@ -212,6 +219,9 @@ class ActiveEffect:
                 self.frame_idx += 1
 
 
+# Effect pool manager: loads the baked pixelfx PNG/JSON assets (or falls back to
+# procedural frames), owns the screen-shake timer, and spawns/updates/draws every
+# active effect. Screen shake is applied internally by draw(), callers pass (0,0).
 class VFXManager:
     # Build the manager.
     # assets_dir: folder holding "<effect>.png/.json" pairs; None = the assets/vfx
@@ -220,7 +230,11 @@ class VFXManager:
     # 640-wide board with big pivots like hit_explosion's 300x240 still under the piece).
     def __init__(self, assets_dir=None, default_scale=0.65):
         if assets_dir is None:
-            assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "vfx")
+            # Phase 5: resolve the asset directory for BOTH normal Python execution
+            # (files next to this .py) and a PyInstaller --onefile bundle, where the
+            # runtime extracts bundled --add-data files under the temp dir sys._MEIPASS.
+            base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+            assets_dir = os.path.join(base_dir, "assets", "vfx")
         self.assets_dir = assets_dir
         self.default_scale = default_scale
         self._effects = {}      # name -> Effect cache (disk load or fallback)

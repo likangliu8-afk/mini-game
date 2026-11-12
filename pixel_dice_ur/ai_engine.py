@@ -62,9 +62,9 @@ def evaluate_state(state, ai_player=2):
     return diff if ai_player == 1 else -diff
 
 
+# Greedy baseline agent: expands only the current legal moves and scores each
+# resulting state with the static heuristic; zero look-ahead, fastest of the three.
 class GreedyAgent:
-    # Single-step AI: expand only the current legal moves and score each result statically.
-
     # Pick the best piece for the current player.
     # state: a GameState whose dice_roll is already known (1/2/3) and whose current_turn
     # is the player this call decides for; ai_player/local legal: derived below from state.
@@ -89,10 +89,9 @@ class GreedyAgent:
         return best_move, move_scores, stats
 
 
+# Deterministic control-group agent: classic alpha-beta minimax that ignores dice
+# randomness by assuming every future roll equals the mean value ASSUMED_ROLL = 2.
 class DeterministicMinimaxAgent:
-    # Control-group AI: classic alpha-beta minimax that ignores dice randomness by
-    # assuming every future roll equals the mean value ASSUMED_ROLL = 2.
-
     ASSUMED_ROLL = 2   # fixed future die value; the mean of the 1/2/3 DICE_PROBS distribution
 
     # Prepare the agent. depth: number of decision plies searched under the current move.
@@ -159,12 +158,12 @@ class DeterministicMinimaxAgent:
         return v
 
 
-class ExpectiminimaxAgent:
-    # Core AI: full chance-node search. Decision nodes branch over legal moves and
-    # chance nodes branch over DICE_PROBS, accumulating prob * value. A per-move
-    # transposition table keyed on (p1, p2, current_turn, [roll], depth) keeps the
-    # depth=4 single-step decision comfortably under 50ms.
 
+# Core agent: full chance-node Expectiminimax. Decision nodes branch over legal
+# moves and chance nodes branch over DICE_PROBS, accumulating prob * value. A
+# per-move transposition table keyed on (p1, p2, current_turn, [roll], depth)
+# keeps the depth=4 single-step decision comfortably under 50 ms.
+class ExpectiminimaxAgent:
     # Prepare the agent. depth: decision plies searched under the current move.
     def __init__(self, depth=4):
         self.depth = depth

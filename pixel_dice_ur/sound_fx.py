@@ -258,30 +258,37 @@ def is_enabled():
 
 
 # Convenience one-shots bound directly to game events in main.py.
+# Play the short dice-shuffle blip at the start of the 260 ms tumble.
 def dice_tick():
     play("dice_tick")
 
 
+# Play the heavy "clack" when the 3D dice face locks onto its final value.
 def dice_land():
     play("dice_land")
 
 
+# Play the soft slide click when any token steps onto a new tile.
 def move_sfx():
     play("move")
 
 
+# Play the capture blast when a war-zone tile absorbs an enemy piece.
 def capture_sfx():
     play("capture")
 
 
+# Play the shimmering rune chime when a shield tile (4 or 8) grants a bonus turn.
 def bonus_sfx():
     play("bonus")
 
 
+# Play the rising arpeggio when a token lands on the Golden Shrine (tile 10).
 def score_sfx():
     play("score")
 
 
+# Play the victory fanfare when all three tokens of one side score.
 def win_sfx():
     play("win")
 

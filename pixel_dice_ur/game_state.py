@@ -15,8 +15,10 @@ SAFE_TILES = (4, 8)            # rune tiles: landing here grants a bonus turn
 DICE_PROBS = {1: 0.25, 2: 0.50, 3: 0.25}   # die value probabilities (equivalent to two coins + base 1)
 
 
+# Full game state of one Pixel Dice Ur match: both sides' piece positions, the
+# current turn owner and the latest die roll. Every method clones or mutates this
+# single source of truth; the UI and the AI engines never invent their own state.
 class GameState:
-    """Full state of one Pixel Dice Ur game: both sides' piece positions, current turn and die roll."""
 
     # Initialize one game. p1_pieces / p2_pieces hold the 3 piece positions for each
     # player (default [0, 0, 0] when None, i.e. all pieces start at the origin);

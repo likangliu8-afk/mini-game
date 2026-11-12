@@ -119,10 +119,9 @@ def run_depth_study():
 
 # Draw the academic two-panel figure: win-rate bars on the left, average decision
 # time and node counts on the right; saved to out_path next to this script.
-# matchup_results: list of (label, wins_a, wins_b, total_games, stats_a, stats_b, time_s)
-# tuples for the three pairings; depth_rows: output of run_depth_study();
-# baseline_times / baseline_nodes: average ms and node counts of Greedy and Minimax
-# measured during the matchup runs.
+# matchup_results: list of (label, wins_a, wins_b) tuples for the three pairings;
+# depth_rows: output of run_depth_study(); baseline_times / baseline_nodes: average
+# ms and node counts of Greedy and Minimax measured during the matchup runs.
 def make_chart(matchup_results, depth_rows, baseline_times, baseline_nodes, out_path):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.6), dpi=150)
 

@@ -151,6 +151,9 @@ def slot_center_in_rect(rect, slot_idx, slot_size=44, gap=12):
     return (x0 + slot_idx * (slot_size + gap) + slot_size // 2, y0 + slot_size // 2)
 
 
+# Pixel-art texture bank: pre-bakes every static surface (tiles, 3D tokens, dice
+# faces, docks, route arrows, stardust, temple background) ONCE at startup so the
+# 60 FPS loop only ever blits cached bitmaps. geo: window dimensions + layout.
 class PixelArtBank:
     # Pre-bake all board tiles, 3D tokens, dice faces, docks, route arrows, and stardust.
     # geo: geometry dictionary containing window dimensions, dock/tray Rects, and path waypoints.
