@@ -823,20 +823,29 @@ class Game:
         title = get_font(26).render(who, True, col)
         self.screen.blit(title, (box.centerx - title.get_width() // 2, box.y + 44))
         f = get_font(16)
-        cx1, cx2 = box.x + 70, box.x + box.width - 70
+        # Phase 4.8 revision: fixed three-column table - labels left-aligned in their
+        # own column, P1/P2 numbers each centered under their header (no more
+        # combined value string drifting onto top of the label text).
+        label_x = box.x + 44
+        col1 = box.centerx - 70
+        col2 = box.centerx + 80
         y = box.y + 100
-        self.screen.blit(f.render("PLAYER 1 (HUMAN)", True, P1_FILL), (cx1 - 90, y - 4))
-        self.screen.blit(f.render("PLAYER 2 (AI)", True, P2_FILL), (cx2 - 60, y - 4))
+        h1 = f.render("PLAYER 1 (HUMAN)", True, P1_FILL)
+        h2 = f.render("PLAYER 2 (AI)", True, P2_FILL)
+        self.screen.blit(h1, (col1 - h1.get_width() // 2, y - 4))
+        self.screen.blit(h2, (col2 - h2.get_width() // 2, y - 4))
         y += 30
         rows = [
-            ("FINAL SCORE", f"{3 if winner == 1 else 0}  -  {0 if winner == 1 else 3}"),
-            ("CAPTURES", f"{p1_cap}        {p2_cap}"),
-            ("BONUS TURNS", f"{self.bonus_count[1]}        {self.bonus_count[2]}"),
+            ("FINAL SCORE", f"{3 if winner == 1 else 0}", f"{0 if winner == 1 else 3}"),
+            ("CAPTURES", str(p1_cap), str(p2_cap)),
+            ("BONUS TURNS", str(self.bonus_count[1]), str(self.bonus_count[2])),
         ]
-        for label, val in rows:
-            self.screen.blit(get_font(13).render(label, True, TEXT_DIM), (box.centerx - 78, y + 2))
-            s = f.render(val, True, HI)
-            self.screen.blit(s, (box.centerx - s.get_width() // 2, y - 4))
+        for label, v1, v2 in rows:
+            self.screen.blit(get_font(13).render(label, True, TEXT_DIM), (label_x, y))
+            s1 = f.render(v1, True, P1_FILL)
+            s2 = f.render(v2, True, P2_FILL)
+            self.screen.blit(s1, (col1 - s1.get_width() // 2, y - 4))
+            self.screen.blit(s2, (col2 - s2.get_width() // 2, y - 4))
             y += 30
         turns_s = get_font(14).render(f"Completed in {self.turns} total turns", True, TEXT)
         self.screen.blit(turns_s, (box.centerx - turns_s.get_width() // 2, y + 6))
