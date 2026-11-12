@@ -1,10 +1,13 @@
 # Name: LAW LI KANG RAIN
 # Student ID: 1904VECI
 #
-# Phase 4.5: pre-baked pixel-art bank for the retro UI. Every texture is painted
+# Phase 4.6: pre-baked pixel-art bank for the retro UI. Every texture is painted
 # pixel by pixel at low resolution and scaled up with nearest-neighbour, so the
 # game gets a hard-edged indie look with zero external art assets. All baking
 # happens once at startup; the main loop only blits cached surfaces.
+# Phase 4.6: _bake_dock now computes slot recesses from a caller-supplied
+# slot_size/gap and the shared slot_centers() helper keeps the baked recess
+# centres and main.py's piece anchors on one identical formula.
 
 import math
 import random
@@ -151,13 +154,16 @@ class PixelArtBank:
         self.tokens[(2, 1)] = self._bake_token((214, 60, 84), (148, 38, 58), (150, 70, 170), 2)
         self.tokens[(2, 2)] = self._bake_token((214, 60, 84), (148, 38, 58), (150, 70, 170), 3)
         self.dice = {face: self._bake_dice(face) for face in (0, 1, 2, 3)}
+        # slot geometry mirrors main.py DOCK_SLOT/DOCK_SLOT_GAP (44, 10) for the
+        # reserve docks and TRAY_SLOT/TRAY_SLOT_GAP (44, 8) for the scored trays -
+        # keep the two in sync or pieces drift off the baked recesses
         self.docks = {
-            1: self._bake_dock(geo["p1_dock"], "P1 RESERVE", (64, 200, 220)),
-            2: self._bake_dock(geo["p2_dock"], "P2 RESERVE", (214, 60, 84)),
+            1: self._bake_dock(geo["p1_dock"], "P1 RESERVE", (64, 200, 220), 44, 10),
+            2: self._bake_dock(geo["p2_dock"], "P2 RESERVE", (214, 60, 84), 44, 10),
         }
         self.trays = {
-            1: self._bake_dock(geo["p1_tray"], "P1 SCORED", (240, 200, 80)),
-            2: self._bake_dock(geo["p2_tray"], "P2 SCORED", (240, 200, 80)),
+            1: self._bake_dock(geo["p1_tray"], "P1 SCORED", (240, 200, 80), 44, 8),
+            2: self._bake_dock(geo["p2_tray"], "P2 SCORED", (240, 200, 80), 44, 8),
         }
         # three breathing intensity levels for the rune-tile glow (index 0 = off)
         self.glow = [None] + self._bake_glow((240, 200, 80))
@@ -209,19 +215,23 @@ class PixelArtBank:
             s.blit(q, (36 - q.get_width() // 2, 40 - q.get_height() // 2))
         return s
 
-    # Bake one 176x76 reserve/score tray background: dark plate, double gold
-    # border, colored label and three recessed 48x48 slots.
-    # rect: target size (width/height); label: text; accent: label color.
-    def _bake_dock(self, rect, label, accent):
+    # Bake one reserve/score tray background: dark plate, double gold border,
+    # colored label and three recessed slots.
+    # rect: target size (width/height); label: text; accent: label color;
+    # slot_size: square recess size in px; gap: px between recesses. The recess
+    # positions come from slot_centers(rect, slot_size, gap) so they match the
+    # piece anchors in main.py exactly (Phase 4.6 - no more hardcoded 48/8 that
+    # overflowed the 120px scored tray).
+    def _bake_dock(self, rect, label, accent, slot_size=44, gap=8):
         s = pygame.Surface((rect.width, rect.height))
         s.fill((28, 26, 40))
         pygame.draw.rect(s, (122, 100, 54), s.get_rect(), 2)
         pygame.draw.rect(s, (58, 52, 78), s.get_rect().inflate(-6, -6), 1)
         s.blit(_font(16).render(label, True, accent), (8, 4))
-        sw, gap = 48, 8
-        x0 = (rect.width - (3 * sw + 2 * gap)) // 2
+        x0 = (rect.width - (3 * slot_size + 2 * gap)) // 2
+        y0 = (rect.height - slot_size) // 2
         for i in range(3):
-            slot = pygame.Rect(x0 + i * (sw + gap), 20, sw, 48)
+            slot = pygame.Rect(x0 + i * (slot_size + gap), y0, slot_size, slot_size)
             pygame.draw.rect(s, (14, 13, 20), slot)
             pygame.draw.rect(s, (74, 68, 96), slot, 2)
             pygame.draw.line(s, (44, 40, 60), (slot.x + 2, slot.y + 2), (slot.right - 3, slot.y + 2))
@@ -283,6 +293,17 @@ class PixelArtBank:
              "col": rng.choice(cols)}
             for _ in range(30)
         ]
+
+
+# Return the screen centre of each of the 3 slots of a dock/tray plate, using
+# the SAME centring math as _bake_dock so piece anchors always sit inside the
+# baked recesses.
+# rect: the plate Rect; slot_size: square slot width in px; gap: px between slots.
+def slot_centers(rect, slot_size, gap):
+    x0 = rect.x + (rect.width - (3 * slot_size + 2 * gap)) // 2
+    y0 = rect.y + (rect.height - slot_size) // 2
+    return [(x0 + i * (slot_size + gap) + slot_size // 2, y0 + slot_size // 2)
+            for i in range(3)]
 
 
 # Draw a raised pixel panel: dark vertical gradient fill, double gold border and
